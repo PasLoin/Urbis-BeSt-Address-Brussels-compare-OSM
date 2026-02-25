@@ -24,7 +24,7 @@ StreetName errors in official source is not yet implemented.
 
 ## Use it : 
 
-go to : 
+go to :  https://pasloin.github.io/Urbis-BeSt-Address-Brussels-compare-OSM/
 
 ! Address mapping in Brussels is not for beginer mapper ! Always check on history and make a survey if you are not sure (or leave a note).
 
