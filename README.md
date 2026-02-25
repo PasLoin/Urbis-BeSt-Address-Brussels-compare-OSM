@@ -26,6 +26,4 @@ StreetName errors in official source is not yet implemented.
 
 go to :  https://pasloin.github.io/Urbis-BeSt-Address-Brussels-compare-OSM/
 
-! Address mapping in Brussels is not for beginer mapper ! Always check on history and make a survey if you are not sure (or leave a note).
-
-! Data is updated every Monday morning.
+Address mapping in Brussels is best suited for experienced mappers. Always check the history and verify on the ground if you are unsure (or leave a note). Data is updated every Monday morning.
