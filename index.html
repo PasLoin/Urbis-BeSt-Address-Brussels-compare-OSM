@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Carte interactive des adresses de Bruxelles comparant UrbIS et OpenStreetMap pour identifier les adresses manquantes.">
+  <meta name="robots" content="index,follow">
+  <title>Adresses Bruxelles – PMTiles</title>
+  <meta property="og:title" content="Adresses Bruxelles – PMTiles">
+  <meta property="og:description" content="Carte interactive des adresses de Bruxelles comparant UrbIS et OpenStreetMap.">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css"/>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="panel">
+  <h3>Filtres</h3>
+  <label class="filter-row">
+    <input type="checkbox" id="f-ok">
+    <span class="dot" style="background:#2ecc71"></span>Présente dans OSM
+  </label>
+  <label class="filter-row">
+    <input type="checkbox" id="f-missing" checked>
+    <span class="dot" style="background:#e74c3c"></span>Manquante dans OSM
+  </label>
+  <label class="filter-row">
+    <input type="checkbox" id="f-verified">
+    <span class="dot" style="background:#3498db"></span>Vérifiée absente
+  </label>
+  <div id="versions">
+    <div>UrbIS : <span id="urbis-date">…</span></div>
+    <div>OSM : <span id="osm-date">…</span></div>
+  </div>
+</div>
+
+<footer id="source-footer">
+  Source du projet :
+  <a href="https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM" target="_blank" rel="noopener noreferrer">
+    github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM
+  </a>
+</footer>
+
+<script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
+<script>
+  fetch('version.json')
+    .then(r => r.json())
+    .then(v => {
+      document.getElementById('urbis-date').textContent = v.urbis_date;
+      document.getElementById('osm-date').textContent = v.osm_date;
+    })
+    .catch(() => {
+      document.getElementById('urbis-date').textContent = 'N/A';
+      document.getElementById('osm-date').textContent = 'N/A';
+    });
+
+  const protocol = new pmtiles.Protocol();
+  maplibregl.addProtocol('pmtiles', protocol.tile);
+
+  const p = new pmtiles.PMTiles('addresses.pmtiles.gz');
+  protocol.add(p);
+
+  const STATUS_COLOR = [
+    'match', ['get', 'status'],
+    'ok',              '#2ecc71',
+    'verified_absent', '#3498db',
+    '#e74c3c'
+  ];
+
+  const map = new maplibregl.Map({
+    container: 'map',
+    style: {
+      version: 8,
+      sources: {
+        osm: {
+          type: 'raster',
+          tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+          tileSize: 256,
+          attribution: '© OpenStreetMap',
+          maxzoom: 19
+        }
+      },
+      glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+      layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
+    },
+    center: [4.352, 50.846],
+    zoom: 10,
+    maxZoom: 19
+  });
+
+  map.addControl(new maplibregl.NavigationControl());
+
+  const filters = { ok: false, missing: true, verified_absent: false };
+
+  function applyFilters() {
+    if (!map.getLayer('addresses-points')) return;
+    const active = Object.entries(filters).filter(([,v]) => v).map(([k]) => k);
+    if (active.length === 0) {
+      map.setFilter('addresses-points', ['==', 'status', '__none__']);
+    } else if (active.length === 3) {
+      map.setFilter('addresses-points', null);
+    } else {
+      map.setFilter('addresses-points', ['in', ['get', 'status'], ['literal', active]]);
+    }
+  }
+
+  map.on('load', () => {
+    map.addSource('addresses-source', {
+      type: 'vector',
+      url: 'pmtiles://addresses.pmtiles.gz'
+    });
+
+    map.addLayer({
+      id: 'addresses-points',
+      type: 'circle',
+      source: 'addresses-source',
+      'source-layer': 'addresses',
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 15, 4, 19, 8],
+        'circle-color': STATUS_COLOR,
+        'circle-stroke-width': 1,
+        'circle-stroke-color': '#fff'
+      }
+    });
+
+    applyFilters();
+  });
+
+  map.on('click', 'addresses-points', (e) => {
+    const p = e.features[0].properties;
+    const lng = e.lngLat.lng;
+    const lat = e.lngLat.lat;
+    const mapillaryUrl = `https://www.mapillary.com/app/?lat=${lat}&lng=${lng}&z=18&focus=map&mapStyle=OpenStreetMap&panos=true`;
+    const panoramaxUrl = `https://api.panoramax.xyz/?focus=map&map=18.12/${lat}/${lng}`;
+    const bboxDelta = 0.0008;
+    const left = lng - bboxDelta;
+    const right = lng + bboxDelta;
+    const top = lat + bboxDelta;
+    const bottom = lat - bboxDelta;
+    const josmUrl = `http://127.0.0.1:8111/load_and_zoom?left=${left}&right=${right}&top=${top}&bottom=${bottom}`;
+    const statusLabels = {
+      ok: '✅ Présente dans OSM',
+      missing: '❌ Manquante dans OSM',
+      verified_absent: '🔵 Vérifiée absente'
+    };
+    const label = statusLabels[p.status] || p.status;
+
+    new maplibregl.Popup()
+      .setLngLat(e.lngLat)
+      .setHTML(`
+        <div style="font-family:sans-serif; padding:8px; min-width:200px;">
+          <div style="margin-bottom: 8px;">
+            <strong style="font-size:14px;">${p.STRNAMEFRE || ''} ${p.POLICENUM || ''}</strong><br>
+            <small style="color:#666;">${p.STRNAMEDUT || ''} ${p.POLICENUM || ''}</small>
+          </div>
+          <div style="background:#f9f9f9; padding:6px; border-radius:4px; font-size:11px; color:#444;">
+            <div style="margin-bottom:4px;"><strong>Status:</strong> ${label}</div>
+            <div style="margin-bottom:4px;"><strong>INSPIRE ID:</strong> <code style="background:#eee; padding:1px 3px;">${p.INSPIRE_ID || 'N/A'}</code></div>
+            <div><strong>Building ID:</strong> ${p.BU_ID || 'N/A'}</div>
+          </div>
+          <div style="margin-top:8px; font-size:10px; color:#999; text-align:right;">
+            ${p.ZIPCODE || ''} ${p.MUNNAMEFRE || ''}
+          </div>
+          <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; font-size:12px;">
+            <a href="${mapillaryUrl}" target="_blank" rel="noopener noreferrer">📷 Voir sur Mapillary</a>
+            <a href="${panoramaxUrl}" target="_blank" rel="noopener noreferrer">🛰️ Voir sur Panoramax</a>
+            <a href="${josmUrl}" target="_blank" rel="noopener noreferrer">🛠️ Éditer la zone (JOSM)</a>
+          </div>
+        </div>
+      `)
+      .addTo(map);
+  });
+
+  map.on('mouseenter', 'addresses-points', () => { map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'addresses-points', () => { map.getCanvas().style.cursor = ''; });
+
+  document.getElementById('f-ok').addEventListener('change', e => { filters.ok = e.target.checked; applyFilters(); });
+  document.getElementById('f-missing').addEventListener('change', e => { filters.missing = e.target.checked; applyFilters(); });
+  document.getElementById('f-verified').addEventListener('change', e => { filters.verified_absent = e.target.checked; applyFilters(); });
+</script>
+</body>
+</html>
