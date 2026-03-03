@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import re
 import subprocess
 import tempfile
 import unicodedata
@@ -17,6 +18,10 @@ def normalize(s):
     s = ' '.join(s.split())
     return s
 
+def split_bilingual(s):
+    s = normalize(s)
+    return [p for p in re.split(r' [-\u2013\u2014] ', s) if p]
+
 class AddressHandler(osmium.SimpleHandler):
     def __init__(self):
         super().__init__()
@@ -25,22 +30,34 @@ class AddressHandler(osmium.SimpleHandler):
 
     def _process(self, tags):
         housenumber = tags.get('addr:housenumber')
-        street = tags.get('addr:street')
-        if housenumber and street:
+        street_tags = [
+            tags.get('addr:street'),
+            tags.get('addr:street_official'),
+            tags.get('addr:place'),
+        ]
+        if housenumber:
             nbrs = [normalize(n) for n in housenumber.split(';')]
-            parts = [normalize(p) for p in street.split(' - ')]
-            for part in parts:
-                for nbr in nbrs:
-                    self.addresses.add((part, nbr.strip()))
+            for raw_street in street_tags:
+                if not raw_street:
+                    continue
+                parts = split_bilingual(raw_street)
+                for part in parts:
+                    for nbr in nbrs:
+                        self.addresses.add((part, nbr.strip()))
 
         not_nbr = tags.get('not:addr:housenumber')
-        not_street = tags.get('not:addr:street')
-        if not_nbr and not_street:
+        not_street_tags = [
+            tags.get('not:addr:street'),
+        ]
+        if not_nbr:
             nbrs = [normalize(n) for n in not_nbr.split(';')]
-            parts = [normalize(p) for p in not_street.split(' - ')]
-            for part in parts:
-                for nbr in nbrs:
-                    self.verified_absent.add((part, nbr.strip()))
+            for raw_street in not_street_tags:
+                if not raw_street:
+                    continue
+                parts = split_bilingual(raw_street)
+                for part in parts:
+                    for nbr in nbrs:
+                        self.verified_absent.add((part, nbr.strip()))
 
     def node(self, n): self._process(n.tags)
     def way(self, w): self._process(w.tags)
