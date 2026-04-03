@@ -27,6 +27,7 @@ class AddressHandler(osmium.SimpleHandler):
         super().__init__()
         self.addresses = set()
         self.verified_absent = set()
+        self.street_name_groups = []
 
     def _process(self, tags):
         housenumber = tags.get('addr:housenumber')
@@ -61,28 +62,51 @@ class AddressHandler(osmium.SimpleHandler):
 
     def node(self, n): self._process(n.tags)
     def way(self, w): self._process(w.tags)
-    def relation(self, r): self._process(r.tags)
+
+    def relation(self, r):
+        self._process(r.tags)
+        if r.tags.get('type') == 'associatedStreet':
+            name_tags = [
+                'name', 'alt_name',
+                'alt_name:fr', 'alt_name:nl',
+                'official_name', 'official_name:fr', 'official_name:nl',
+            ]
+            variants = set()
+            for tag in name_tags:
+                val = r.tags.get(tag)
+                if val:
+                    for part in split_bilingual(val):
+                        variants.add(part)
+            if len(variants) > 1:
+                self.street_name_groups.append(variants)
 
 def load_osm(pbf_path):
     print(f'[OSM] Lecture de {pbf_path}...')
     handler = AddressHandler()
     handler.apply_file(pbf_path, locations=False)
-    return handler.addresses, handler.verified_absent
+    alias_map = {}
+    for group in handler.street_name_groups:
+        for name in group:
+            alias_map.setdefault(name, set()).update(group - {name})
+    return handler.addresses, handler.verified_absent, alias_map
 
-def get_status(streetfr, streetnl, nbr, osm_addrs, verified_absent):
+def get_status(streetfr, streetnl, nbr, osm_addrs, verified_absent, alias_map):
     if not nbr: return 'missing'
     nbr_n = normalize(nbr)
-    keys = []
-    if streetfr: keys.append((normalize(streetfr), nbr_n))
-    if streetnl: keys.append((normalize(streetnl), nbr_n))
-    if any(k in osm_addrs for k in keys): return 'ok'
-    if any(k in verified_absent for k in keys): return 'verified_absent'
+    base = set()
+    if streetfr: base.add(normalize(streetfr))
+    if streetnl: base.add(normalize(streetnl))
+    expanded = set(base)
+    for s in base:
+        expanded.update(alias_map.get(s, set()))
+    if any((s, nbr_n) in osm_addrs for s in expanded): return 'ok'
+    if any((s, nbr_n) in verified_absent for s in base): return 'verified_absent'
     return 'missing'
 
 def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
-    osm_addrs, verified_absent = set(), set()
+    osm_addrs, verified_absent, alias_map = set(), set(), {}
     if pbf_path and os.path.isfile(pbf_path):
-        osm_addrs, verified_absent = load_osm(pbf_path)
+        osm_addrs, verified_absent, alias_map = load_osm(pbf_path)
 
     print(f'[GEO] Lecture de {gpkg_path}...')
     gdf = gpd.read_file(gpkg_path, layer='Addresses')
@@ -95,7 +119,7 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
     gdf['status'] = gdf.apply(
         lambda row: get_status(
             row['STRNAMEFRE'], row['STRNAMEDUT'], row['POLICENUM'],
-            osm_addrs, verified_absent
+            osm_addrs, verified_absent, alias_map
         ), axis=1
     )
 
