@@ -22,12 +22,28 @@ def split_bilingual(s):
     s = normalize(s)
     return [p for p in re.split(r' [-\u2013\u2014] ', s) if p]
 
+STREET_NAME_TAGS = [
+    'name', 'alt_name', 'alt_name:fr', 'alt_name:nl',
+    'official_name', 'official_name:fr', 'official_name:nl',
+    'not:name', 'old_name', 'name:left', 'name:right',
+]
+
 class AddressHandler(osmium.SimpleHandler):
     def __init__(self):
         super().__init__()
         self.addresses = set()
         self.verified_absent = set()
         self.street_name_groups = []
+
+    def _collect_street_variants(self, tags):
+        variants = set()
+        for tag in STREET_NAME_TAGS:
+            val = tags.get(tag)
+            if val:
+                for part in split_bilingual(val):
+                    variants.add(part)
+        if len(variants) > 1:
+            self.street_name_groups.append(variants)
 
     def _process(self, tags):
         housenumber = tags.get('addr:housenumber')
@@ -61,24 +77,16 @@ class AddressHandler(osmium.SimpleHandler):
                         self.verified_absent.add((part, nbr.strip()))
 
     def node(self, n): self._process(n.tags)
-    def way(self, w): self._process(w.tags)
+
+    def way(self, w):
+        self._process(w.tags)
+        if w.tags.get('highway'):
+            self._collect_street_variants(w.tags)
 
     def relation(self, r):
         self._process(r.tags)
         if r.tags.get('type') == 'associatedStreet':
-            name_tags = [
-                'name', 'alt_name',
-                'alt_name:fr', 'alt_name:nl',
-                'official_name', 'official_name:fr', 'official_name:nl',
-            ]
-            variants = set()
-            for tag in name_tags:
-                val = r.tags.get(tag)
-                if val:
-                    for part in split_bilingual(val):
-                        variants.add(part)
-            if len(variants) > 1:
-                self.street_name_groups.append(variants)
+            self._collect_street_variants(r.tags)
 
 def load_osm(pbf_path):
     print(f'[OSM] Lecture de {pbf_path}...')
