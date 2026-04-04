@@ -95,7 +95,7 @@ if __name__ == '__main__':
     with open('version.json', 'w') as f:
         json.dump({
             'urbis_date': str(latest_dt.date()),
-            'osm_date': str(date.today() - timedelta(days=1))
+            'osm_date': str(date.today() - timedelta(days=2))
         }, f)
     print('[OK] version.json écrit.')
 
