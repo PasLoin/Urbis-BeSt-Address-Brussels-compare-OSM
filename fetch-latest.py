@@ -6,11 +6,12 @@ import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 import json
-from datetime import datetime, date, timedelta
+from datetime import datetime
 
-FEED_URL = 'https://urbisdownload.datastore.brussels/atomfeed/2cf42541-1813-11ef-8a81-00090ffe0001-en.xml'
-ATOM_NS  = 'http://www.w3.org/2005/Atom'
-HEADERS  = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
+FEED_URL  = 'https://urbisdownload.datastore.brussels/atomfeed/2cf42541-1813-11ef-8a81-00090ffe0001-en.xml'
+STATE_URL = 'https://download.openstreetmap.fr/extracts/europe/belgium/brussels_capital_region.state.txt'
+ATOM_NS   = 'http://www.w3.org/2005/Atom'
+HEADERS   = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
 
 def find_latest_gpkg(feed_url):
     print('[FEED] Lecture du feed ATOM...')
@@ -35,6 +36,20 @@ def find_latest_gpkg(feed_url):
     latest_dt, latest_url = candidates[0]
     print(f'[FEED] Dernière version : {latest_dt.date()} → {latest_url}')
     return latest_dt, latest_url
+
+def fetch_osm_date():
+    print('[OSM] Récupération du timestamp OSM...')
+    try:
+        with urllib.request.urlopen(STATE_URL, timeout=10) as r:
+            content = r.read().decode()
+        for line in content.splitlines():
+            if line.startswith('timestamp='):
+                ts = line.split('=', 1)[1].replace('\\:', ':').strip()
+                print(f'[OSM] Timestamp : {ts}')
+                return ts
+    except Exception as e:
+        print(f'[WARN] Impossible de récupérer le timestamp OSM : {e}')
+    return None
 
 def download(url, dest):
     print(f'[DL] Téléchargement de {os.path.basename(url)}...')
@@ -78,26 +93,21 @@ def run(script, *args):
 
 if __name__ == '__main__':
     no_tiles = '--no-tiles' in sys.argv
-
     latest_dt, latest_url = find_latest_gpkg(FEED_URL)
     zip_name = os.path.basename(latest_url)
-
     if not os.path.isfile(zip_name):
         download(latest_url, zip_name)
     else:
         print(f'[DL] Déjà présent, téléchargement ignoré : {zip_name}')
-
     gpkg_path = extract_gpkg(zip_name)
-
     print(f'\n[TILES] Génération des PMTiles...')
     run('generate-tiles.py', gpkg_path, 'addresses.pmtiles')
-
+    osm_date = fetch_osm_date()
     with open('version.json', 'w') as f:
         json.dump({
             'urbis_date': str(latest_dt.date()),
-            'osm_date': str(date.today() - timedelta(days=2))
+            'osm_date': osm_date,
         }, f)
     print('[OK] version.json écrit.')
-
     print('\n[DONE] Pipeline complet.')
     print('       PMTiles : addresses.pmtiles')
