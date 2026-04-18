@@ -11,118 +11,6 @@
   <meta property="og:type" content="website">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css"/>
   <link rel="stylesheet" href="style.css"/>
-  <style>
-    /* Lasso tool styles */
-    #lasso-btn {
-      position: absolute;
-      top: 10px;
-      right: 60px;
-      z-index: 10;
-      background: #fff;
-      border: 2px solid rgba(0,0,0,.2);
-      border-radius: 4px;
-      padding: 6px 12px;
-      cursor: pointer;
-      font-size: 13px;
-      font-family: sans-serif;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      box-shadow: 0 1px 4px rgba(0,0,0,.15);
-      transition: background .15s;
-    }
-    #lasso-btn:hover { background: #f0f0f0; }
-    #lasso-btn.active { background: #3498db; color: #fff; border-color: #2980b9; }
-    #lasso-btn svg { width: 16px; height: 16px; }
-
-    /* Lasso selection panel */
-    #lasso-panel {
-      display: none;
-      position: absolute;
-      bottom: 40px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 10;
-      background: #fff;
-      border-radius: 8px;
-      box-shadow: 0 2px 12px rgba(0,0,0,.25);
-      padding: 12px 18px;
-      font-family: sans-serif;
-      font-size: 13px;
-      text-align: center;
-      max-width: 400px;
-    }
-    #lasso-panel button {
-      margin: 6px 4px 0;
-      padding: 6px 14px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-    #lasso-export { background: #2ecc71; color: #fff; }
-    #lasso-export:hover { background: #27ae60; }
-    #lasso-cancel { background: #e74c3c; color: #fff; }
-    #lasso-cancel:hover { background: #c0392b; }
-
-    /* Copy toast */
-    #copy-toast {
-      display: none;
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #333;
-      color: #fff;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-family: sans-serif;
-      font-size: 13px;
-      z-index: 999;
-      pointer-events: none;
-    }
-
-    /* Popup styles */
-    .popup-content { font-family: sans-serif; padding: 8px; min-width: 220px; }
-    .popup-title { margin-bottom: 8px; }
-    .popup-title strong { font-size: 14px; }
-    .popup-title small { color: #666; }
-    .popup-meta { background: #f9f9f9; padding: 8px; border-radius: 4px; font-size: 11px; color: #444; }
-    .popup-meta-row { margin-bottom: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-    .popup-footer { margin-top: 8px; font-size: 10px; color: #999; text-align: right; }
-    .popup-links { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; }
-    .popup-links a { white-space: nowrap; }
-    .copy-id-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 2px;
-      background: #eee;
-      border: 1px solid #ccc;
-      border-radius: 3px;
-      padding: 1px 5px;
-      cursor: pointer;
-      font-size: 10px;
-      color: #555;
-      vertical-align: middle;
-      transition: background .15s;
-    }
-    .copy-id-btn:hover { background: #ddd; }
-    .copy-id-btn svg { width: 11px; height: 11px; }
-    .inspire-link { font-family: monospace; font-size: 11px; }
-    .osm-xml-btn {
-      display: inline-block;
-      margin-top: 8px;
-      padding: 5px 10px;
-      background: #f39c12;
-      color: #fff;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 11px;
-      text-decoration: none;
-    }
-    .osm-xml-btn:hover { background: #e67e22; }
-  </style>
 </head>
 <body>
 <div id="map"></div>
@@ -226,8 +114,6 @@
       xml += `  <node id="-${i + 1}" lat="${lat}" lon="${lng}" version="0" changeset="0">\n`;
       if (p.POLICENUM) xml += `    <tag k="addr:housenumber" v="${escapeXml(p.POLICENUM)}"/>\n`;
       if (street)      xml += `    <tag k="addr:street" v="${escapeXml(street)}"/>\n`;
-      if (p.ZIPCODE)   xml += `    <tag k="addr:postcode" v="${escapeXml(p.ZIPCODE)}"/>\n`;
-      if (p.MUNNAMEFRE) xml += `    <tag k="addr:city" v="${escapeXml(p.MUNNAMEFRE)}"/>\n`;
       if (id)          xml += `    <tag k="ref:databrussels" v="${escapeXml(id)}"/>\n`;
       xml += `  </node>\n`;
     });
@@ -404,7 +290,6 @@
       `)
       .addTo(map);
 
-    // Attach handlers after popup renders
     setTimeout(() => {
       const copyBtn = document.getElementById(uid);
       if (copyBtn) {
@@ -468,7 +353,7 @@
     }
     const coords = [...lassoPoints.map(p => [p.lng, p.lat])];
     if (lassoPoints.length >= 3) {
-      coords.push(coords[0]); // close ring
+      coords.push(coords[0]);
       source.setData({
         type: 'FeatureCollection',
         features: [{
@@ -488,7 +373,6 @@
   }
 
   function pointInPolygon(point, polygon) {
-    // Ray-casting algorithm
     let inside = false;
     const x = point[0], y = point[1];
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -504,8 +388,6 @@
     if (lassoPoints.length < 3) return;
 
     const polyCoords = lassoPoints.map(p => [p.lng, p.lat]);
-
-    // Query rendered features in the viewport, then filter by polygon
     const features = map.queryRenderedFeatures({ layers: ['addresses-points'] });
 
     const seen = new Set();
@@ -529,7 +411,6 @@
     lassoCountEl.textContent = lassoSelectedFeatures.length;
     lassoPanel.style.display = 'block';
 
-    // Deactivate drawing but keep polygon visible
     lassoActive = false;
     lassoBtn.classList.remove('active');
     map.getCanvas().style.cursor = '';
@@ -568,7 +449,6 @@
     lassoPanel.style.display = 'none';
   });
 
-  // Escape key to cancel lasso
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       if (lassoActive) toggleLasso();
