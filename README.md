@@ -20,7 +20,9 @@ Use the filter panel to isolate the addresses you care about — typically `miss
 
 OSM matching is based on `addr:street` and `addr:housenumber` tags. Verified absences use `not:addr:street` / `not:addr:housenumber`. Street names are normalized (accents stripped, case folded) before comparison. The JOSM link uses remote control on `127.0.0.1:8111`, so JOSM needs to be open with remote control enabled.
 
-StreetName errors in official source is not yet implemented. 
+~~StreetName errors in official source is not yet implemented.~~
+
+Street name variants are handled by building an alias map from OSM highway and `associatedStreet` relation tags (`name`, `alt_name`, `official_name`, `old_name`, `name:left`, `name:right`, and their `fr`/`nl` variants). When a street appears under multiple names in OSM, all variants are grouped together so that an address is matched regardless of which form the official source uses.
 
 ## Use it : 
 
