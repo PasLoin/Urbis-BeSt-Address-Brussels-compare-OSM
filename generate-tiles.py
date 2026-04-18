@@ -133,7 +133,7 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
 
     columns_to_keep = [
         'STRNAMEFRE', 'STRNAMEDUT', 'POLICENUM', 'ZIPCODE',
-        'MUNNAMEFRE', 'MUNNAMEDUT', 'status', 'INSPIRE_ID', 'PARENTID', 'BU_ID', 'geometry'
+        'MUNNAMEFRE', 'MUNNAMEDUT', 'status', 'INSPIRE_ID', 'PARENTID', 'geometry'
     ]
     existing_cols = [c for c in columns_to_keep if c in gdf.columns]
     gdf = gdf[existing_cols]
