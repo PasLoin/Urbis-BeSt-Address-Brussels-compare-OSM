@@ -11,9 +11,142 @@
   <meta property="og:type" content="website">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css"/>
   <link rel="stylesheet" href="style.css"/>
+  <style>
+    /* Lasso tool styles */
+    #lasso-btn {
+      position: absolute;
+      top: 10px;
+      right: 60px;
+      z-index: 10;
+      background: #fff;
+      border: 2px solid rgba(0,0,0,.2);
+      border-radius: 4px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: sans-serif;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.15);
+      transition: background .15s;
+    }
+    #lasso-btn:hover { background: #f0f0f0; }
+    #lasso-btn.active { background: #3498db; color: #fff; border-color: #2980b9; }
+    #lasso-btn svg { width: 16px; height: 16px; }
+
+    /* Lasso selection panel */
+    #lasso-panel {
+      display: none;
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.25);
+      padding: 12px 18px;
+      font-family: sans-serif;
+      font-size: 13px;
+      text-align: center;
+      max-width: 400px;
+    }
+    #lasso-panel button {
+      margin: 6px 4px 0;
+      padding: 6px 14px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    #lasso-export { background: #2ecc71; color: #fff; }
+    #lasso-export:hover { background: #27ae60; }
+    #lasso-cancel { background: #e74c3c; color: #fff; }
+    #lasso-cancel:hover { background: #c0392b; }
+
+    /* Copy toast */
+    #copy-toast {
+      display: none;
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #333;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-family: sans-serif;
+      font-size: 13px;
+      z-index: 999;
+      pointer-events: none;
+    }
+
+    /* Popup styles */
+    .popup-content { font-family: sans-serif; padding: 8px; min-width: 220px; }
+    .popup-title { margin-bottom: 8px; }
+    .popup-title strong { font-size: 14px; }
+    .popup-title small { color: #666; }
+    .popup-meta { background: #f9f9f9; padding: 8px; border-radius: 4px; font-size: 11px; color: #444; }
+    .popup-meta-row { margin-bottom: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+    .popup-footer { margin-top: 8px; font-size: 10px; color: #999; text-align: right; }
+    .popup-links { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+    .popup-links a { white-space: nowrap; }
+    .copy-id-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      background: #eee;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+      padding: 1px 5px;
+      cursor: pointer;
+      font-size: 10px;
+      color: #555;
+      vertical-align: middle;
+      transition: background .15s;
+    }
+    .copy-id-btn:hover { background: #ddd; }
+    .copy-id-btn svg { width: 11px; height: 11px; }
+    .inspire-link { font-family: monospace; font-size: 11px; }
+    .osm-xml-btn {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 5px 10px;
+      background: #f39c12;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      text-decoration: none;
+    }
+    .osm-xml-btn:hover { background: #e67e22; }
+  </style>
 </head>
 <body>
 <div id="map"></div>
+
+<button id="lasso-btn" title="Sélection lasso">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M7 22a5 5 0 0 1-2-4"/>
+    <path d="M7 16.93c.96.43 1.96.74 2.99.91"/>
+    <path d="M3.34 14A6.8 6.8 0 0 1 2 10c0-4.42 4.48-8 10-8s10 3.58 10 8a7.19 7.19 0 0 1-.33 2"/>
+    <path d="M5 18a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/>
+    <path d="M14.33 22h-.09a.35.35 0 0 1-.24-.32v-10a.34.34 0 0 1 .56-.27l6.08 5.18a.36.36 0 0 1-.04.57l-2.72 1.33"/>
+    <path d="M17.73 19.4 21 23"/>
+  </svg>
+  Lasso
+</button>
+
+<div id="lasso-panel">
+  <strong id="lasso-count">0</strong> adresse(s) sélectionnée(s)
+  <br>
+  <button id="lasso-export">Exporter .osm</button>
+  <button id="lasso-cancel">Annuler</button>
+</div>
+
+<div id="copy-toast">ID copié !</div>
 
 <div id="panel">
   <h3>Filtres</h3>
@@ -45,6 +178,7 @@
 <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
 <script>
+  // ─── Versions ────────────────────────────────────
   fetch('version.json')
     .then(r => r.json())
     .then(v => {
@@ -56,6 +190,73 @@
       document.getElementById('osm-date').textContent = 'N/A';
     });
 
+  // ─── Helpers ─────────────────────────────────────
+  function extractInspireId(raw) {
+    if (!raw) return null;
+    const m = String(raw).match(/(\d+)$/);
+    return m ? m[1] : String(raw);
+  }
+
+  function inspireUrl(raw) {
+    if (!raw) return null;
+    const id = extractInspireId(raw);
+    return `https://databrussels.be/id/address/${id}`;
+  }
+
+  function buildStreetTag(fr, nl) {
+    const parts = [];
+    if (fr) parts.push(fr);
+    if (nl && nl !== fr) parts.push(nl);
+    return parts.join(' - ');
+  }
+
+  function escapeXml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+  }
+
+  function generateOsmXml(features) {
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" generator="UrbIS-Sync">\n';
+    features.forEach((f, i) => {
+      const p = f.properties || f;
+      const lng = f.lng || (f.geometry && f.geometry.coordinates[0]);
+      const lat = f.lat || (f.geometry && f.geometry.coordinates[1]);
+      const street = buildStreetTag(p.STRNAMEFRE, p.STRNAMEDUT);
+      const id = extractInspireId(p.INSPIRE_ID);
+      xml += `  <node id="-${i + 1}" lat="${lat}" lon="${lng}" version="0" changeset="0">\n`;
+      if (p.POLICENUM) xml += `    <tag k="addr:housenumber" v="${escapeXml(p.POLICENUM)}"/>\n`;
+      if (street)      xml += `    <tag k="addr:street" v="${escapeXml(street)}"/>\n`;
+      if (p.ZIPCODE)   xml += `    <tag k="addr:postcode" v="${escapeXml(p.ZIPCODE)}"/>\n`;
+      if (p.MUNNAMEFRE) xml += `    <tag k="addr:city" v="${escapeXml(p.MUNNAMEFRE)}"/>\n`;
+      if (id)          xml += `    <tag k="ref:databrussels" v="${escapeXml(id)}"/>\n`;
+      xml += `  </node>\n`;
+    });
+    xml += '</osm>\n';
+    return xml;
+  }
+
+  function downloadOsmXml(features, filename) {
+    const xml = generateOsmXml(features);
+    const blob = new Blob([xml], { type: 'application/xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'addresses.osm';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('copy-toast');
+    t.textContent = msg || 'ID copié !';
+    t.style.display = 'block';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.display = 'none'; }, 1500);
+  }
+
+  // ─── Map ─────────────────────────────────────────
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol('pmtiles', protocol.tile);
 
@@ -92,6 +293,7 @@
 
   map.addControl(new maplibregl.NavigationControl());
 
+  // ─── Filters ─────────────────────────────────────
   const filters = { ok: false, missing: true, verified_absent: false };
 
   function applyFilters() {
@@ -126,59 +328,258 @@
     });
 
     applyFilters();
+
+    // Lasso polygon layer
+    map.addSource('lasso-source', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+    map.addLayer({
+      id: 'lasso-fill',
+      type: 'fill',
+      source: 'lasso-source',
+      paint: { 'fill-color': '#3498db', 'fill-opacity': 0.15 }
+    });
+    map.addLayer({
+      id: 'lasso-line',
+      type: 'line',
+      source: 'lasso-source',
+      paint: { 'line-color': '#2980b9', 'line-width': 2, 'line-dasharray': [3, 2] }
+    });
   });
 
+  // ─── Popup on click ──────────────────────────────
   map.on('click', 'addresses-points', (e) => {
-    const p = e.features[0].properties;
+    if (lassoActive) return;
+    const pr = e.features[0].properties;
     const lng = e.lngLat.lng;
     const lat = e.lngLat.lat;
+
+    const numericId = extractInspireId(pr.INSPIRE_ID);
+    const inspireHref = inspireUrl(pr.INSPIRE_ID);
+
     const mapillaryUrl = `https://www.mapillary.com/app/?lat=${lat}&lng=${lng}&z=18&focus=map&mapStyle=OpenStreetMap&panos=true`;
     const panoramaxUrl = `https://api.panoramax.xyz/?focus=map&map=18.12/${lat}/${lng}`;
     const bboxDelta = 0.0008;
-    const left = lng - bboxDelta;
-    const right = lng + bboxDelta;
-    const top = lat + bboxDelta;
-    const bottom = lat - bboxDelta;
-    const josmUrl = `http://127.0.0.1:8111/load_and_zoom?left=${left}&right=${right}&top=${top}&bottom=${bottom}`;
+    const josmUrl = `http://127.0.0.1:8111/load_and_zoom?left=${lng-bboxDelta}&right=${lng+bboxDelta}&top=${lat+bboxDelta}&bottom=${lat-bboxDelta}`;
+
     const statusLabels = {
       ok: '✅ Présente dans OSM',
       missing: '❌ Manquante dans OSM',
       verified_absent: '🔵 Vérifiée absente'
     };
-    const label = statusLabels[p.status] || p.status;
+    const label = statusLabels[pr.status] || pr.status;
 
-    new maplibregl.Popup()
+    const uid = 'copy-' + Date.now();
+
+    const popup = new maplibregl.Popup()
       .setLngLat(e.lngLat)
       .setHTML(`
-        <div style="font-family:sans-serif; padding:8px; min-width:200px;">
-          <div style="margin-bottom: 8px;">
-            <strong style="font-size:14px;">${p.STRNAMEFRE || ''} ${p.POLICENUM || ''}</strong><br>
-            <small style="color:#666;">${p.STRNAMEDUT || ''} ${p.POLICENUM || ''}</small>
+        <div class="popup-content">
+          <div class="popup-title">
+            <strong>${pr.STRNAMEFRE || ''} ${pr.POLICENUM || ''}</strong><br>
+            <small>${pr.STRNAMEDUT || ''} ${pr.POLICENUM || ''}</small>
           </div>
-          <div style="background:#f9f9f9; padding:6px; border-radius:4px; font-size:11px; color:#444;">
-            <div style="margin-bottom:4px;"><strong>Status:</strong> ${label}</div>
-            <div style="margin-bottom:4px;"><strong>INSPIRE ID:</strong> <code style="background:#eee; padding:1px 3px;">${p.INSPIRE_ID || 'N/A'}</code></div>
-            <div><strong>Building ID:</strong> ${p.BU_ID || 'N/A'}</div>
+          <div class="popup-meta">
+            <div class="popup-meta-row"><strong>Status :</strong> ${label}</div>
+            <div class="popup-meta-row">
+              <strong>INSPIRE :</strong>
+              <a href="${inspireHref}" target="_blank" rel="noopener noreferrer" class="inspire-link">${numericId}</a>
+              <button class="copy-id-btn" id="${uid}" title="Copier l'ID">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                copier
+              </button>
+            </div>
           </div>
-          <div style="margin-top:8px; font-size:10px; color:#999; text-align:right;">
-            ${p.ZIPCODE || ''} ${p.MUNNAMEFRE || ''}
+          <div class="popup-footer">
+            ${pr.ZIPCODE || ''} ${pr.MUNNAMEFRE || ''}
           </div>
-          <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; font-size:12px;">
-            <a href="${mapillaryUrl}" target="_blank" rel="noopener noreferrer">Voir sur Mapillary</a>
-            <a href="${panoramaxUrl}" target="_blank" rel="noopener noreferrer">Voir sur Panoramax</a>
-            <a href="${josmUrl}" target="_blank" rel="noopener noreferrer">Éditer la zone (JOSM)</a>
+          <div class="popup-links">
+            <a href="${mapillaryUrl}" target="_blank" rel="noopener noreferrer">Mapillary</a>
+            <a href="${panoramaxUrl}" target="_blank" rel="noopener noreferrer">Panoramax</a>
+            <a href="${josmUrl}" target="_blank" rel="noopener noreferrer">JOSM</a>
+            <button class="osm-xml-btn" id="osm-dl-${uid}">⬇ .osm</button>
           </div>
         </div>
       `)
       .addTo(map);
+
+    // Attach handlers after popup renders
+    setTimeout(() => {
+      const copyBtn = document.getElementById(uid);
+      if (copyBtn) {
+        copyBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          navigator.clipboard.writeText(numericId).then(() => showToast('ID copié !'));
+        });
+      }
+      const dlBtn = document.getElementById('osm-dl-' + uid);
+      if (dlBtn) {
+        dlBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          downloadOsmXml([{ properties: pr, lng, lat }], `address-${numericId}.osm`);
+        });
+      }
+    }, 50);
   });
 
-  map.on('mouseenter', 'addresses-points', () => { map.getCanvas().style.cursor = 'pointer'; });
-  map.on('mouseleave', 'addresses-points', () => { map.getCanvas().style.cursor = ''; });
+  map.on('mouseenter', 'addresses-points', () => { if (!lassoActive) map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'addresses-points', () => { if (!lassoActive) map.getCanvas().style.cursor = ''; });
 
+  // ─── Filter controls ────────────────────────────
   document.getElementById('f-ok').addEventListener('change', e => { filters.ok = e.target.checked; applyFilters(); });
   document.getElementById('f-missing').addEventListener('change', e => { filters.missing = e.target.checked; applyFilters(); });
   document.getElementById('f-verified').addEventListener('change', e => { filters.verified_absent = e.target.checked; applyFilters(); });
+
+  // ─── Lasso tool ──────────────────────────────────
+  let lassoActive = false;
+  let lassoPoints = [];
+  let lassoSelectedFeatures = [];
+
+  const lassoBtn = document.getElementById('lasso-btn');
+  const lassoPanel = document.getElementById('lasso-panel');
+  const lassoCountEl = document.getElementById('lasso-count');
+
+  function toggleLasso() {
+    lassoActive = !lassoActive;
+    lassoBtn.classList.toggle('active', lassoActive);
+    if (lassoActive) {
+      lassoPoints = [];
+      lassoSelectedFeatures = [];
+      map.getCanvas().style.cursor = 'crosshair';
+      map.dragPan.disable();
+      updateLassoPolygon();
+      lassoPanel.style.display = 'none';
+    } else {
+      map.getCanvas().style.cursor = '';
+      map.dragPan.enable();
+      lassoPoints = [];
+      updateLassoPolygon();
+      lassoPanel.style.display = 'none';
+    }
+  }
+
+  function updateLassoPolygon() {
+    const source = map.getSource('lasso-source');
+    if (!source) return;
+    if (lassoPoints.length < 2) {
+      source.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+    const coords = [...lassoPoints.map(p => [p.lng, p.lat])];
+    if (lassoPoints.length >= 3) {
+      coords.push(coords[0]); // close ring
+      source.setData({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [coords] }
+        }]
+      });
+    } else {
+      source.setData({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: coords }
+        }]
+      });
+    }
+  }
+
+  function pointInPolygon(point, polygon) {
+    // Ray-casting algorithm
+    let inside = false;
+    const x = point[0], y = point[1];
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i][0], yi = polygon[i][1];
+      const xj = polygon[j][0], yj = polygon[j][1];
+      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function finishLasso() {
+    if (lassoPoints.length < 3) return;
+
+    const polyCoords = lassoPoints.map(p => [p.lng, p.lat]);
+
+    // Query rendered features in the viewport, then filter by polygon
+    const features = map.queryRenderedFeatures({ layers: ['addresses-points'] });
+
+    const seen = new Set();
+    lassoSelectedFeatures = [];
+
+    for (const f of features) {
+      const coords = f.geometry.coordinates;
+      const key = `${coords[0]},${coords[1]}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (pointInPolygon(coords, polyCoords)) {
+        lassoSelectedFeatures.push({
+          properties: f.properties,
+          lng: coords[0],
+          lat: coords[1],
+          geometry: f.geometry
+        });
+      }
+    }
+
+    lassoCountEl.textContent = lassoSelectedFeatures.length;
+    lassoPanel.style.display = 'block';
+
+    // Deactivate drawing but keep polygon visible
+    lassoActive = false;
+    lassoBtn.classList.remove('active');
+    map.getCanvas().style.cursor = '';
+    map.dragPan.enable();
+  }
+
+  lassoBtn.addEventListener('click', toggleLasso);
+
+  map.on('click', (e) => {
+    if (!lassoActive) return;
+    lassoPoints.push(e.lngLat);
+    updateLassoPolygon();
+  });
+
+  map.on('dblclick', (e) => {
+    if (!lassoActive) return;
+    e.preventDefault();
+    finishLasso();
+  });
+
+  map.on('contextmenu', (e) => {
+    if (!lassoActive) return;
+    e.preventDefault();
+    finishLasso();
+  });
+
+  document.getElementById('lasso-export').addEventListener('click', () => {
+    if (lassoSelectedFeatures.length === 0) return;
+    downloadOsmXml(lassoSelectedFeatures, 'addresses-selection.osm');
+  });
+
+  document.getElementById('lasso-cancel').addEventListener('click', () => {
+    lassoPoints = [];
+    lassoSelectedFeatures = [];
+    updateLassoPolygon();
+    lassoPanel.style.display = 'none';
+  });
+
+  // Escape key to cancel lasso
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (lassoActive) toggleLasso();
+      else {
+        lassoPoints = [];
+        lassoSelectedFeatures = [];
+        updateLassoPolygon();
+        lassoPanel.style.display = 'none';
+      }
+    }
+  });
 </script>
 </body>
 </html>
