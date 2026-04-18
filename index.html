@@ -56,13 +56,6 @@
   </div>
 </div>
 
-<footer id="source-footer">
-  Source du projet :
-  <a href="https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM" target="_blank" rel="noopener noreferrer">
-    github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM
-  </a>
-</footer>
-
 <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
 <script>
@@ -158,6 +151,7 @@
 
   const map = new maplibregl.Map({
     container: 'map',
+    attributionControl: false,
     style: {
       version: 8,
       sources: {
@@ -165,7 +159,7 @@
           type: 'raster',
           tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
           tileSize: 256,
-          attribution: '© OpenStreetMap',
+          attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>',
           maxzoom: 19
         }
       },
@@ -177,6 +171,10 @@
     maxZoom: 19
   });
 
+  map.addControl(new maplibregl.AttributionControl({ compact: false, customAttribution: [
+    'Adresses : <a href="https://datastore.brussels/web/data/dataset/a8c9ccde-5c2b-11ed-913a-900f0cda5d5c" target="_blank">Paradigm</a> (CC-0)',
+    '<a href="https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM" target="_blank">PasLoin</a> (MIT)'
+  ]}));
   map.addControl(new maplibregl.NavigationControl());
 
   // ─── Filters ─────────────────────────────────────
