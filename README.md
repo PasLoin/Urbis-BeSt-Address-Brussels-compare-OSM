@@ -18,7 +18,7 @@ Use the filter panel to isolate the addresses you care about — typically `miss
 
 ## Matching logic
 
-OSM matching is based on `addr:street` and `addr:housenumber` tags. Verified absences use `not:addr:street` / `not:addr:housenumber`. Street names are normalized (accents stripped, case folded) before comparison. The JOSM link uses remote control on `127.0.0.1:8111`, so JOSM needs to be open with remote control enabled.
+OSM matching is based on `addr:street` and `addr:housenumber` tags. Verified absences use `not:addr:street` / `not:addr:housenumber` as well as `was:addr:street` / `was:addr:housenumber` (typically used on demolished buildings). Street names are normalized (accents stripped, case folded) before comparison. The JOSM link uses remote control on `127.0.0.1:8111`, so JOSM needs to be open with remote control enabled.
 
 ~~StreetName errors in official source is not yet implemented.~~
 
