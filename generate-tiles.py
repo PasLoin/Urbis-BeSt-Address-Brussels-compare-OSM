@@ -113,8 +113,8 @@ def get_status(streetfr, streetnl, nbr, osm_addrs, verified_absent, alias_map):
     expanded = set(base)
     for s in base:
         expanded.update(alias_map.get(s, set()))
-    if any((s, nbr_n) in osm_addrs for s in expanded): return 'ok'
     if any((s, nbr_n) in verified_absent for s in base): return 'verified_absent'
+    if any((s, nbr_n) in osm_addrs for s in expanded): return 'ok'
     return 'missing'
 
 def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
