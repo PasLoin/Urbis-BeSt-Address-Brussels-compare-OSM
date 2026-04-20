@@ -45,6 +45,22 @@ class AddressHandler(osmium.SimpleHandler):
         if len(variants) > 1:
             self.street_name_groups.append(variants)
 
+    def _collect_verified_absent(self, prefix, tags):
+        """Collect verified-absent addresses from not:addr:* or was:addr:* tags."""
+        nbr_tag = tags.get(f'{prefix}:addr:housenumber')
+        street_tags = [
+            tags.get(f'{prefix}:addr:street'),
+        ]
+        if nbr_tag:
+            nbrs = [normalize(n) for n in nbr_tag.split(';')]
+            for raw_street in street_tags:
+                if not raw_street:
+                    continue
+                parts = split_bilingual(raw_street)
+                for part in parts:
+                    for nbr in nbrs:
+                        self.verified_absent.add((part, nbr.strip()))
+
     def _process(self, tags):
         housenumber = tags.get('addr:housenumber')
         street_tags = [
@@ -62,19 +78,9 @@ class AddressHandler(osmium.SimpleHandler):
                     for nbr in nbrs:
                         self.addresses.add((part, nbr.strip()))
 
-        not_nbr = tags.get('not:addr:housenumber')
-        not_street_tags = [
-            tags.get('not:addr:street'),
-        ]
-        if not_nbr:
-            nbrs = [normalize(n) for n in not_nbr.split(';')]
-            for raw_street in not_street_tags:
-                if not raw_street:
-                    continue
-                parts = split_bilingual(raw_street)
-                for part in parts:
-                    for nbr in nbrs:
-                        self.verified_absent.add((part, nbr.strip()))
+        # Handle both not:addr:* and was:addr:* as verified absent
+        for prefix in ('not', 'was'):
+            self._collect_verified_absent(prefix, tags)
 
     def node(self, n): self._process(n.tags)
 
@@ -107,8 +113,8 @@ def get_status(streetfr, streetnl, nbr, osm_addrs, verified_absent, alias_map):
     expanded = set(base)
     for s in base:
         expanded.update(alias_map.get(s, set()))
-    if any((s, nbr_n) in osm_addrs for s in expanded): return 'ok'
     if any((s, nbr_n) in verified_absent for s in base): return 'verified_absent'
+    if any((s, nbr_n) in osm_addrs for s in expanded): return 'ok'
     return 'missing'
 
 def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):

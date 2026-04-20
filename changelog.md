@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-04-19
+
+### Ajouté
+
+- **Support `was:addr:*`** — Les tags `was:addr:housenumber` / `was:addr:street` (utilisés sur les bâtiments démolis) sont désormais traités comme `not:addr:*`, marquant l'adresse comme « vérifiée absente » (#3).
+
 ## 2026-04-18
 
 ### Ajouté
