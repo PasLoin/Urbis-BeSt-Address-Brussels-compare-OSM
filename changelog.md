@@ -1,10 +1,16 @@
 # Changelog
 
+## 2026-04-22
+
+### Corrigé
+
+- **Alias de rues pour `not:addr:*` / `was:addr:*`** - La vérification « vérifié absent » utilise désormais la liste étendue des variantes de noms de rues (incluant `official_name`, `alt_name`, etc.), comme c'est déjà le cas pour la détection `ok`. Corrige les faux « manquant » quand le nom OSM diffère du nom UrbIS (#6).
+
 ## 2026-04-19
 
 ### Ajouté
 
-- **Support `was:addr:*`** — Les tags `was:addr:housenumber` / `was:addr:street` (utilisés sur les bâtiments démolis) sont désormais traités comme `not:addr:*`, marquant l'adresse comme « vérifiée absente » (#3).
+- **Support `was:addr:*`** - Les tags `was:addr:housenumber` / `was:addr:street` (utilisés sur les bâtiments démolis) sont désormais traités comme `not:addr:*`, marquant l'adresse comme « vérifiée absente » (#3).
 
 ## 2026-04-18
 
