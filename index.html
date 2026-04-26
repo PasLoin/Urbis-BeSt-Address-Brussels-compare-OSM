@@ -37,7 +37,7 @@
 <div id="copy-toast">ID copié !</div>
 
 <details id="panel" open>
-  <summary>Filtres</summary>
+  <summary>Filtres <span class="toggle-arrow"></span></summary>
   <label class="filter-row">
     <input type="checkbox" id="f-ok">
     <span class="dot" style="background:#2ecc71"></span>Présente dans OSM
@@ -199,7 +199,7 @@
     'Adresses : <a href="https://datastore.brussels/web/data/dataset/a8c9ccde-5c2b-11ed-913a-900f0cda5d5c" target="_blank">Paradigm</a> (CC-0)',
     '<a href="https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM" target="_blank">PasLoin</a>'
   ]}));
-  map.addControl(new maplibregl.NavigationControl());
+  map.addControl(new maplibregl.NavigationControl(), 'bottom-left');
 
   // ─── Filters ─────────────────────────────────────
   const filters = { ok: false, missing: true, verified_absent: false };
