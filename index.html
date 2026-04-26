@@ -36,8 +36,8 @@
 
 <div id="copy-toast">ID copié !</div>
 
-<div id="panel">
-  <h3>Filtres</h3>
+<details id="panel" open>
+  <summary>Filtres</summary>
   <label class="filter-row">
     <input type="checkbox" id="f-ok">
     <span class="dot" style="background:#2ecc71"></span>Présente dans OSM
@@ -58,7 +58,7 @@
     <div>UrbIS : <span id="urbis-date">…</span></div>
     <div>OSM : <span id="osm-date">…</span></div>
   </div>
-</div>
+</details>
 
 <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
