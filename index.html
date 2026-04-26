@@ -70,7 +70,7 @@
       document.getElementById('urbis-date').textContent = v.urbis_date;
       document.getElementById('osm-date').textContent = v.osm_date;
 
-      if (v.stats && v.stats.total > 0 && v.stats.osm_loaded) {
+      if (v.stats && v.stats.total > 0 && v.stats.osm_loaded !== false) {
         const s = v.stats;
         const pctOk  = (s.ok / s.total * 100).toFixed(3);
         const pctMis = (s.missing / s.total * 100).toFixed(3);
