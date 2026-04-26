@@ -50,6 +50,10 @@
     <input type="checkbox" id="f-verified">
     <span class="dot" style="background:#3498db"></span>Vérifiée absente
   </label>
+  <div id="stats">
+    <div class="stats-bar" id="stats-bar"></div>
+    <div class="stats-rows" id="stats-rows"></div>
+  </div>
   <div id="versions">
     <div>UrbIS : <span id="urbis-date">…</span></div>
     <div>OSM : <span id="osm-date">…</span></div>
@@ -59,12 +63,32 @@
 <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
 <script>
-  // ─── Versions ────────────────────────────────────
+  // ─── Versions & Stats ───────────────────────────
   fetch('version.json')
     .then(r => r.json())
     .then(v => {
       document.getElementById('urbis-date').textContent = v.urbis_date;
       document.getElementById('osm-date').textContent = v.osm_date;
+
+      if (v.stats && v.stats.total > 0) {
+        const s = v.stats;
+        const pctOk  = (s.ok / s.total * 100).toFixed(1);
+        const pctMis = (s.missing / s.total * 100).toFixed(1);
+        const pctVer = (s.verified_absent / s.total * 100).toFixed(1);
+
+        // Stacked progress bar
+        document.getElementById('stats-bar').innerHTML =
+          `<span class="bar-seg" style="width:${pctOk}%;background:#2ecc71" title="Présentes : ${pctOk}%"></span>` +
+          `<span class="bar-seg" style="width:${pctVer}%;background:#3498db" title="Vérifiées absentes : ${pctVer}%"></span>` +
+          `<span class="bar-seg" style="width:${pctMis}%;background:#e74c3c" title="Manquantes : ${pctMis}%"></span>`;
+
+        // Detail rows
+        document.getElementById('stats-rows').innerHTML =
+          `<div class="stats-row"><span>Total</span><strong>${s.total.toLocaleString('fr-BE')}</strong></div>` +
+          `<div class="stats-row"><span class="dot" style="background:#2ecc71"></span><span>Présentes</span><span>${s.ok.toLocaleString('fr-BE')} (${pctOk} %)</span></div>` +
+          `<div class="stats-row"><span class="dot" style="background:#e74c3c"></span><span>Manquantes</span><span>${s.missing.toLocaleString('fr-BE')} (${pctMis} %)</span></div>` +
+          `<div class="stats-row"><span class="dot" style="background:#3498db"></span><span>Vérifiées abs.</span><span>${s.verified_absent.toLocaleString('fr-BE')} (${pctVer} %)</span></div>`;
+      }
     })
     .catch(() => {
       document.getElementById('urbis-date').textContent = 'N/A';
