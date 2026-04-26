@@ -102,11 +102,20 @@ if __name__ == '__main__':
     gpkg_path = extract_gpkg(zip_name)
     print(f'\n[TILES] Génération des PMTiles...')
     run('generate-tiles.py', gpkg_path, 'addresses.pmtiles')
+
+    # Read coverage statistics produced by generate-tiles.py
+    stats = {}
+    if os.path.isfile('stats.json'):
+        with open('stats.json') as f:
+            stats = json.load(f)
+        os.remove('stats.json')
+
     osm_date = fetch_osm_date()
     with open('version.json', 'w') as f:
         json.dump({
             'urbis_date': str(latest_dt.date()),
             'osm_date': osm_date,
+            'stats': stats,
         }, f)
     print('[OK] version.json écrit.')
     print('\n[DONE] Pipeline complet.')
