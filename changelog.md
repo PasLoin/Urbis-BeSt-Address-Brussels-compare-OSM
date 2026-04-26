@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-04-26
+
+### Ajouté
+
+- **Statistiques de couverture** - Le panneau de filtres affiche désormais le nombre total d'adresses UrbIS ainsi que la répartition par statut (présentes, manquantes, vérifiées absentes) avec pourcentages et barre de progression. Les compteurs sont calculés par le pipeline et enregistrés dans `version.json` (#9).
+- **Panneau de filtres repliable** - Le panneau utilise un élément `<details>` natif, permettant de le replier d'un clic pour libérer de l'espace sur petit écran (#8).
+
 ## 2026-04-22
 
 ### Corrigé
