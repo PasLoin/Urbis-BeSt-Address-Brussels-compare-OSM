@@ -5,6 +5,7 @@ import re
 import subprocess
 import tempfile
 import unicodedata
+import json
 import geopandas as gpd
 import osmium
 
@@ -136,6 +137,19 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
             osm_addrs, verified_absent, alias_map
         ), axis=1
     )
+
+    # Compute coverage statistics
+    counts = gdf['status'].value_counts()
+    stats = {
+        'total': int(len(gdf)),
+        'ok': int(counts.get('ok', 0)),
+        'missing': int(counts.get('missing', 0)),
+        'verified_absent': int(counts.get('verified_absent', 0)),
+    }
+    stats_path = os.path.join(os.path.dirname(pmtiles_path) or '.', 'stats.json')
+    with open(stats_path, 'w') as f:
+        json.dump(stats, f)
+    print(f'[STATS] {stats}')
 
     columns_to_keep = [
         'STRNAMEFRE', 'STRNAMEDUT', 'POLICENUM', 'ZIPCODE',
