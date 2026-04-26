@@ -120,8 +120,13 @@ def get_status(streetfr, streetnl, nbr, osm_addrs, verified_absent, alias_map):
 
 def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
     osm_addrs, verified_absent, alias_map = set(), set(), {}
+    osm_loaded = False
     if pbf_path and os.path.isfile(pbf_path):
         osm_addrs, verified_absent, alias_map = load_osm(pbf_path)
+        osm_loaded = True
+        print(f'[OSM] {len(osm_addrs)} adresses, {len(verified_absent)} vérifiées absentes')
+    else:
+        print(f'[WARN] Fichier PBF introuvable ({pbf_path}), pas de croisement OSM')
 
     print(f'[GEO] Lecture de {gpkg_path}...')
     gdf = gpd.read_file(gpkg_path, layer='Addresses')
@@ -139,12 +144,13 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
     )
 
     # Compute coverage statistics
-    counts = gdf['status'].value_counts()
+    counts = gdf['status'].value_counts().to_dict()
     stats = {
         'total': int(len(gdf)),
         'ok': int(counts.get('ok', 0)),
         'missing': int(counts.get('missing', 0)),
         'verified_absent': int(counts.get('verified_absent', 0)),
+        'osm_loaded': osm_loaded,
     }
     stats_path = os.path.join(os.path.dirname(pmtiles_path) or '.', 'stats.json')
     with open(stats_path, 'w') as f:
