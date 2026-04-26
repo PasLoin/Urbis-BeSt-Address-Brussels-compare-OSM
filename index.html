@@ -70,11 +70,11 @@
       document.getElementById('urbis-date').textContent = v.urbis_date;
       document.getElementById('osm-date').textContent = v.osm_date;
 
-      if (v.stats && v.stats.total > 0) {
+      if (v.stats && v.stats.total > 0 && v.stats.osm_loaded) {
         const s = v.stats;
-        const pctOk  = (s.ok / s.total * 100).toFixed(1);
-        const pctMis = (s.missing / s.total * 100).toFixed(1);
-        const pctVer = (s.verified_absent / s.total * 100).toFixed(1);
+        const pctOk  = (s.ok / s.total * 100).toFixed(3);
+        const pctMis = (s.missing / s.total * 100).toFixed(3);
+        const pctVer = (s.verified_absent / s.total * 100).toFixed(3);
 
         // Stacked progress bar
         document.getElementById('stats-bar').innerHTML =
@@ -85,9 +85,9 @@
         // Detail rows
         document.getElementById('stats-rows').innerHTML =
           `<div class="stats-row"><span>Total</span><strong>${s.total.toLocaleString('fr-BE')}</strong></div>` +
-          `<div class="stats-row"><span class="dot" style="background:#2ecc71"></span><span>Présentes</span><span>${s.ok.toLocaleString('fr-BE')} (${pctOk} %)</span></div>` +
-          `<div class="stats-row"><span class="dot" style="background:#e74c3c"></span><span>Manquantes</span><span>${s.missing.toLocaleString('fr-BE')} (${pctMis} %)</span></div>` +
-          `<div class="stats-row"><span class="dot" style="background:#3498db"></span><span>Vérifiées abs.</span><span>${s.verified_absent.toLocaleString('fr-BE')} (${pctVer} %)</span></div>`;
+          `<div class="stats-row"><span class="dot" style="background:#2ecc71"></span><span>Présentes</span><span>${s.ok.toLocaleString('fr-BE')} (${pctOk}\u202f%)</span></div>` +
+          `<div class="stats-row"><span class="dot" style="background:#e74c3c"></span><span>Manquantes</span><span>${s.missing.toLocaleString('fr-BE')} (${pctMis}\u202f%)</span></div>` +
+          `<div class="stats-row"><span class="dot" style="background:#3498db"></span><span>Vérifiées abs.</span><span>${s.verified_absent.toLocaleString('fr-BE')} (${pctVer}\u202f%)</span></div>`;
       }
     })
     .catch(() => {
