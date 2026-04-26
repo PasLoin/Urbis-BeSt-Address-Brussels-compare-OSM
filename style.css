@@ -13,11 +13,12 @@ html, body, #map { height: 100%; margin: 0; }
   cursor: pointer; font-weight: bold;
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   list-style: none;
+  -webkit-user-select: none; user-select: none;
 }
 #panel summary::-webkit-details-marker,
 #panel summary::marker { display: none; content: ''; }
-#panel summary::after { content: '▲'; font-size: 9px; color: #999; }
-#panel:not([open]) summary::after { content: '▼'; }
+#panel summary .toggle-arrow::before { content: '▲'; font-size: 9px; color: #999; }
+#panel:not([open]) summary .toggle-arrow::before { content: '▼'; }
 #panel[open] summary { margin-bottom: 10px; }
 .filter-row { display: flex; align-items: center; margin-bottom: 8px; cursor: pointer; user-select: none; }
 .filter-row input { margin-right: 8px; width: 16px; height: 16px; }
