@@ -10,7 +10,32 @@ html, body, #map { height: 100%; margin: 0; }
 #panel h3 { margin: 0 0 10px 0; font-size: 13px; text-transform: uppercase; color: #555; }
 .filter-row { display: flex; align-items: center; margin-bottom: 8px; cursor: pointer; user-select: none; }
 .filter-row input { margin-right: 8px; width: 16px; height: 16px; }
-.dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; margin-right: 8px; border: 1px solid rgba(0,0,0,0.2); }
+.dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; margin-right: 8px; border: 1px solid rgba(0,0,0,0.2); flex-shrink: 0; }
+
+/* ─── Stats ─────────────────────────────────────── */
+#stats {
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid #eee;
+}
+.stats-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #eee;
+  margin-bottom: 8px;
+}
+.bar-seg { height: 100%; transition: width .3s; }
+.stats-rows { font-size: 11px; color: #444; }
+.stats-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+.stats-row .dot { width: 10px; height: 10px; margin-right: 4px; }
+.stats-row span:last-child { margin-left: auto; font-variant-numeric: tabular-nums; }
+.stats-row strong { margin-left: auto; font-variant-numeric: tabular-nums; }
+
 #versions {
   margin-top: 12px; padding-top: 10px; border-top: 1px solid #eee;
   font-size: 11px; color: #888; line-height: 1.8;
