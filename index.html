@@ -450,11 +450,11 @@
     lassoSelectedFeatures = [];
 
     for (const f of features) {
+      if (NON_EXPORTABLE.has(f.properties.status)) continue;
       const coords = f.geometry.coordinates;
       const key = `${coords[0]},${coords[1]}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      if (NON_EXPORTABLE.has(f.properties.status)) continue;
       if (pointInPolygon(coords, polyCoords)) {
         lassoSelectedFeatures.push({
           properties: f.properties,
