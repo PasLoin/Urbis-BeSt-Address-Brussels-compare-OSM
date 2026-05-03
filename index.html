@@ -290,11 +290,11 @@
     const josmUrl = `http://127.0.0.1:8111/load_and_zoom?left=${lng-bboxDelta}&right=${lng+bboxDelta}&top=${lat+bboxDelta}&bottom=${lat-bboxDelta}`;
 
     const statusLabels = {
-      ok: '✅ Présente dans OSM',
-      missing: '❌ Manquante dans OSM',
-      verified_absent: '🔵 Vérifiée absente',
-      missing_in_urbis: '🟣 Absente d\'UrbIS (à vérifier)',
-      missing_in_urbis_verified: '🟠 Absente d\'UrbIS (vérifiée)'
+      ok: '<span class="dot" style="background:#2ecc71"></span>Présente dans OSM',
+      missing: '<span class="dot" style="background:#e74c3c"></span>Manquante dans OSM',
+      verified_absent: '<span class="dot" style="background:#3498db"></span>Vérifiée absente',
+      missing_in_urbis: '<span class="dot" style="background:#9b59b6"></span>Absente d\'UrbIS (à vérifier)',
+      missing_in_urbis_verified: '<span class="dot" style="background:#9ef7e6"></span>Absente d\'UrbIS (vérifiée)'
     };
     const label = statusLabels[pr.status] || pr.status;
 
