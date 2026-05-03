@@ -9,9 +9,14 @@ import json
 import pandas as pd
 import geopandas as gpd
 import osmium
-from shapely.geometry import Point
+from shapely.geometry import Point, shape
+from shapely.prepared import prep
+import urllib.request
 
 PBF_FILE = 'brussels_capital_region-latest.osm.pbf'
+BOUNDARY_RELATION = 54094
+BOUNDARY_URL = f'https://polygons.openstreetmap.fr/get_geojson.py?id={BOUNDARY_RELATION}&params=0'
+HEADERS = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
 
 def normalize(s):
     if not s: return ''
@@ -129,6 +134,21 @@ class AddressHandler(osmium.SimpleHandler):
         if r.tags.get('type') == 'associatedStreet':
             self._collect_street_variants(r.tags)
 
+def load_boundary():
+    """Download the Brussels-Capital Region boundary polygon (relation/54094)."""
+    print(f'[BOUNDARY] Téléchargement de la frontière (relation/{BOUNDARY_RELATION})...')
+    try:
+        req = urllib.request.Request(BOUNDARY_URL, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read())
+        geom = shape(data)
+        prepared = prep(geom)
+        print(f'[BOUNDARY] Polygone chargé ({geom.geom_type}, {geom.area:.6f}°²)')
+        return prepared
+    except Exception as e:
+        print(f'[WARN] Impossible de charger la frontière : {e}')
+        return None
+
 def load_osm(pbf_path):
     print(f'[OSM] Lecture de {pbf_path}...')
     handler = AddressHandler()
@@ -152,7 +172,7 @@ def get_status(streetfr, streetnl, nbr, osm_addrs, verified_absent, alias_map):
     if any((s, nbr_n) in verified_absent for s in expanded): return 'verified_absent'
     return 'missing'
 
-def find_osm_only(gdf, osm_addrs, osm_details, alias_map):
+def find_osm_only(gdf, osm_addrs, osm_details, alias_map, boundary=None):
     """Find OSM addresses that have no match in the UrbIS dataset."""
     # Build expanded UrbIS address set
     urbis_set = set()
@@ -172,7 +192,13 @@ def find_osm_only(gdf, osm_addrs, osm_details, alias_map):
 
     # Find OSM addresses not in UrbIS
     osm_only = []
+    skipped_boundary = 0
     for (norm_street, norm_nbr), detail in osm_details.items():
+        # Filter by Brussels boundary
+        if boundary is not None:
+            if not boundary.contains(Point(detail['lon'], detail['lat'])):
+                skipped_boundary += 1
+                continue
         # Expand with aliases
         candidates = {norm_street}
         candidates.update(alias_map.get(norm_street, set()))
@@ -180,6 +206,8 @@ def find_osm_only(gdf, osm_addrs, osm_details, alias_map):
             continue
         osm_only.append(detail)
 
+    if boundary is not None:
+        print(f'[REVERSE] {skipped_boundary} adresses OSM hors Région exclues')
     print(f'[REVERSE] {len(osm_only)} adresses OSM absentes d\'UrbIS')
     return osm_only
 
@@ -211,7 +239,8 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
     # Reverse matching: find OSM addresses missing from UrbIS
     osm_only_count = 0
     if osm_loaded:
-        osm_only = find_osm_only(gdf, osm_addrs, osm_details, alias_map)
+        boundary = load_boundary()
+        osm_only = find_osm_only(gdf, osm_addrs, osm_details, alias_map, boundary)
         osm_only_count = len(osm_only)
         if osm_only:
             rows = []
