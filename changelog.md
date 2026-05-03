@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-05-03
+
+### Ajouté
+
+- **Adresses absentes d'UrbIS** - Détection inversée : les adresses présentes dans OSM mais absentes du jeu de données UrbIS sont désormais identifiées et affichées sur la carte. Deux sous-catégories : « à vérifier » (violet) et « vérifiée » (lorsque le tag `note` de l'objet OSM contient le mot *urbis*, insensible à la casse). Les points sont filtrés par la frontière de la Région de Bruxelles-Capitale (relation `54094`) pour exclure les adresses hors Région présentes dans le bbox du PBF. L'outil lasso exclut ces deux catégories de l'export `.osm` (#12).
+
 ## 2026-04-26
 
 ### Ajouté

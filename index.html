@@ -50,6 +50,14 @@
     <input type="checkbox" id="f-verified">
     <span class="dot" style="background:#3498db"></span>Vérifiée absente
   </label>
+  <label class="filter-row">
+    <input type="checkbox" id="f-missing-urbis">
+    <span class="dot" style="background:#9b59b6"></span>Absente d'UrbIS (à vérifier)
+  </label>
+  <label class="filter-row">
+    <input type="checkbox" id="f-missing-urbis-verified">
+    <span class="dot" style="background:#9ef7e6"></span>Absente d'UrbIS (vérifiée)
+  </label>
   <div id="stats">
     <div class="stats-bar" id="stats-bar"></div>
     <div class="stats-rows" id="stats-rows"></div>
@@ -76,18 +84,25 @@
         const pctMis = (s.missing / s.total * 100).toFixed(3);
         const pctVer = (s.verified_absent / s.total * 100).toFixed(3);
 
-        // Stacked progress bar
+        // Stacked progress bar (UrbIS coverage only)
         document.getElementById('stats-bar').innerHTML =
           `<span class="bar-seg" style="width:${pctOk}%;background:#2ecc71" title="Présentes : ${pctOk}%"></span>` +
           `<span class="bar-seg" style="width:${pctVer}%;background:#3498db" title="Vérifiées absentes : ${pctVer}%"></span>` +
           `<span class="bar-seg" style="width:${pctMis}%;background:#e74c3c" title="Manquantes : ${pctMis}%"></span>`;
 
         // Detail rows
+        const misUrbis = s.missing_in_urbis || 0;
+        const misUrbisVer = s.missing_in_urbis_verified || 0;
+        const misUrbisTotal = misUrbis + misUrbisVer;
         document.getElementById('stats-rows').innerHTML =
-          `<div class="stats-row"><span>Total</span><strong>${s.total.toLocaleString('fr-BE')}</strong></div>` +
+          `<div class="stats-row"><span>Total UrbIS</span><strong>${s.total.toLocaleString('fr-BE')}</strong></div>` +
           `<div class="stats-row"><span class="dot" style="background:#2ecc71"></span><span>Présentes</span><span>${s.ok.toLocaleString('fr-BE')} (${pctOk}\u202f%)</span></div>` +
           `<div class="stats-row"><span class="dot" style="background:#e74c3c"></span><span>Manquantes</span><span>${s.missing.toLocaleString('fr-BE')} (${pctMis}\u202f%)</span></div>` +
-          `<div class="stats-row"><span class="dot" style="background:#3498db"></span><span>Vérifiées abs.</span><span>${s.verified_absent.toLocaleString('fr-BE')} (${pctVer}\u202f%)</span></div>`;
+          `<div class="stats-row"><span class="dot" style="background:#3498db"></span><span>Vérifiées abs.</span><span>${s.verified_absent.toLocaleString('fr-BE')} (${pctVer}\u202f%)</span></div>` +
+          (misUrbisTotal > 0
+            ? `<div class="stats-row stats-separator"><span class="dot" style="background:#9b59b6"></span><span>Abs. UrbIS (à vér.)</span><span>${misUrbis.toLocaleString('fr-BE')}</span></div>` +
+              `<div class="stats-row"><span class="dot" style="background:#9ef7e6"></span><span>Abs. UrbIS (vérifiée)</span><span>${misUrbisVer.toLocaleString('fr-BE')}</span></div>`
+            : '');
       }
     })
     .catch(() => {
@@ -170,6 +185,8 @@
     'match', ['get', 'status'],
     'ok',              '#2ecc71',
     'verified_absent', '#3498db',
+    'missing_in_urbis','#9b59b6',
+    'missing_in_urbis_verified','#9ef7e6',
     '#e74c3c'
   ];
 
@@ -202,14 +219,14 @@
   map.addControl(new maplibregl.NavigationControl(), 'bottom-left');
 
   // ─── Filters ─────────────────────────────────────
-  const filters = { ok: false, missing: true, verified_absent: false };
+  const filters = { ok: false, missing: true, verified_absent: false, missing_in_urbis: false, missing_in_urbis_verified: false };
 
   function applyFilters() {
     if (!map.getLayer('addresses-points')) return;
     const active = Object.entries(filters).filter(([,v]) => v).map(([k]) => k);
     if (active.length === 0) {
       map.setFilter('addresses-points', ['==', 'status', '__none__']);
-    } else if (active.length === 3) {
+    } else if (active.length === Object.keys(filters).length) {
       map.setFilter('addresses-points', null);
     } else {
       map.setFilter('addresses-points', ['in', ['get', 'status'], ['literal', active]]);
@@ -265,6 +282,7 @@
 
     const numericId = extractInspireId(pr.INSPIRE_ID);
     const inspireHref = inspireUrl(pr.INSPIRE_ID);
+    const hasInspire = !!pr.INSPIRE_ID;
 
     const mapillaryUrl = `https://www.mapillary.com/app/?lat=${lat}&lng=${lng}&z=18&focus=map&mapStyle=OpenStreetMap&panos=true`;
     const panoramaxUrl = `https://api.panoramax.xyz/?focus=map&map=18.12/${lat}/${lng}`;
@@ -272,13 +290,30 @@
     const josmUrl = `http://127.0.0.1:8111/load_and_zoom?left=${lng-bboxDelta}&right=${lng+bboxDelta}&top=${lat+bboxDelta}&bottom=${lat-bboxDelta}`;
 
     const statusLabels = {
-      ok: '✅ Présente dans OSM',
-      missing: '❌ Manquante dans OSM',
-      verified_absent: '🔵 Vérifiée absente'
+      ok: '<span class="dot" style="background:#2ecc71"></span>Présente dans OSM',
+      missing: '<span class="dot" style="background:#e74c3c"></span>Manquante dans OSM',
+      verified_absent: '<span class="dot" style="background:#3498db"></span>Vérifiée absente',
+      missing_in_urbis: '<span class="dot" style="background:#9b59b6"></span>Absente d\'UrbIS (à vérifier)',
+      missing_in_urbis_verified: '<span class="dot" style="background:#9ef7e6"></span>Absente d\'UrbIS (vérifiée)'
     };
     const label = statusLabels[pr.status] || pr.status;
 
     const uid = 'copy-' + Date.now();
+
+    const inspireRow = hasInspire
+      ? `<div class="popup-meta-row">
+              <strong>INSPIRE :</strong>
+              <a href="${inspireHref}" target="_blank" rel="noopener noreferrer" class="inspire-link">${numericId}</a>
+              <button class="copy-id-btn" id="${uid}" title="Copier l'ID">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                copier
+              </button>
+            </div>`
+      : '';
+
+    const osmDlBtn = hasInspire
+      ? `<button class="osm-xml-btn" id="osm-dl-${uid}">⬇ .osm</button>`
+      : '';
 
     const popup = new maplibregl.Popup()
       .setLngLat(e.lngLat)
@@ -286,18 +321,11 @@
         <div class="popup-content">
           <div class="popup-title">
             <strong>${pr.STRNAMEFRE || ''} ${pr.POLICENUM || ''}</strong><br>
-            <small>${pr.STRNAMEDUT || ''} ${pr.POLICENUM || ''}</small>
+            <small>${pr.STRNAMEDUT || ''} ${pr.STRNAMEDUT ? (pr.POLICENUM || '') : ''}</small>
           </div>
           <div class="popup-meta">
             <div class="popup-meta-row"><strong>Status :</strong> ${label}</div>
-            <div class="popup-meta-row">
-              <strong>INSPIRE :</strong>
-              <a href="${inspireHref}" target="_blank" rel="noopener noreferrer" class="inspire-link">${numericId}</a>
-              <button class="copy-id-btn" id="${uid}" title="Copier l'ID">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                copier
-              </button>
-            </div>
+            ${inspireRow}
           </div>
           <div class="popup-footer">
             ${pr.ZIPCODE || ''} ${pr.MUNNAMEFRE || ''}
@@ -306,26 +334,28 @@
             <a href="${mapillaryUrl}" target="_blank" rel="noopener noreferrer">Mapillary</a>
             <a href="${panoramaxUrl}" target="_blank" rel="noopener noreferrer">Panoramax</a>
             <a href="${josmUrl}" target="_blank" rel="noopener noreferrer">JOSM</a>
-            <button class="osm-xml-btn" id="osm-dl-${uid}">⬇ .osm</button>
+            ${osmDlBtn}
           </div>
         </div>
       `)
       .addTo(map);
 
     setTimeout(() => {
-      const copyBtn = document.getElementById(uid);
-      if (copyBtn) {
-        copyBtn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          navigator.clipboard.writeText(numericId).then(() => showToast('ID copié !'));
-        });
-      }
-      const dlBtn = document.getElementById('osm-dl-' + uid);
-      if (dlBtn) {
-        dlBtn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          downloadOsmXml([{ properties: pr, lng, lat }], `address-${numericId}.osm`);
-        });
+      if (hasInspire) {
+        const copyBtn = document.getElementById(uid);
+        if (copyBtn) {
+          copyBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            navigator.clipboard.writeText(numericId).then(() => showToast('ID copié !'));
+          });
+        }
+        const dlBtn = document.getElementById('osm-dl-' + uid);
+        if (dlBtn) {
+          dlBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            downloadOsmXml([{ properties: pr, lng, lat }], `address-${numericId}.osm`);
+          });
+        }
       }
     }, 50);
   });
@@ -337,6 +367,8 @@
   document.getElementById('f-ok').addEventListener('change', e => { filters.ok = e.target.checked; applyFilters(); });
   document.getElementById('f-missing').addEventListener('change', e => { filters.missing = e.target.checked; applyFilters(); });
   document.getElementById('f-verified').addEventListener('change', e => { filters.verified_absent = e.target.checked; applyFilters(); });
+  document.getElementById('f-missing-urbis').addEventListener('change', e => { filters.missing_in_urbis = e.target.checked; applyFilters(); });
+  document.getElementById('f-missing-urbis-verified').addEventListener('change', e => { filters.missing_in_urbis_verified = e.target.checked; applyFilters(); });
 
   // ─── Lasso tool ──────────────────────────────────
   let lassoActive = false;
@@ -406,6 +438,8 @@
     return inside;
   }
 
+  const NON_EXPORTABLE = new Set(['missing_in_urbis', 'missing_in_urbis_verified']);
+
   function finishLasso() {
     if (lassoPoints.length < 3) return;
 
@@ -416,6 +450,7 @@
     lassoSelectedFeatures = [];
 
     for (const f of features) {
+      if (NON_EXPORTABLE.has(f.properties.status)) continue;
       const coords = f.geometry.coordinates;
       const key = `${coords[0]},${coords[1]}`;
       if (seen.has(key)) continue;
