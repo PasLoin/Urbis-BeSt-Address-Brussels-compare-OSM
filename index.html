@@ -52,7 +52,11 @@
   </label>
   <label class="filter-row">
     <input type="checkbox" id="f-missing-urbis">
-    <span class="dot" style="background:#9b59b6"></span>Absente d'UrbIS
+    <span class="dot" style="background:#9b59b6"></span>Absente d'UrbIS (à vérifier)
+  </label>
+  <label class="filter-row">
+    <input type="checkbox" id="f-missing-urbis-verified">
+    <span class="dot" style="background:#9ef7e6"></span>Absente d'UrbIS (vérifiée)
   </label>
   <div id="stats">
     <div class="stats-bar" id="stats-bar"></div>
@@ -88,13 +92,16 @@
 
         // Detail rows
         const misUrbis = s.missing_in_urbis || 0;
+        const misUrbisVer = s.missing_in_urbis_verified || 0;
+        const misUrbisTotal = misUrbis + misUrbisVer;
         document.getElementById('stats-rows').innerHTML =
           `<div class="stats-row"><span>Total UrbIS</span><strong>${s.total.toLocaleString('fr-BE')}</strong></div>` +
           `<div class="stats-row"><span class="dot" style="background:#2ecc71"></span><span>Présentes</span><span>${s.ok.toLocaleString('fr-BE')} (${pctOk}\u202f%)</span></div>` +
           `<div class="stats-row"><span class="dot" style="background:#e74c3c"></span><span>Manquantes</span><span>${s.missing.toLocaleString('fr-BE')} (${pctMis}\u202f%)</span></div>` +
           `<div class="stats-row"><span class="dot" style="background:#3498db"></span><span>Vérifiées abs.</span><span>${s.verified_absent.toLocaleString('fr-BE')} (${pctVer}\u202f%)</span></div>` +
-          (misUrbis > 0
-            ? `<div class="stats-row stats-separator"><span class="dot" style="background:#9b59b6"></span><span>Absentes d'UrbIS</span><span>${misUrbis.toLocaleString('fr-BE')}</span></div>`
+          (misUrbisTotal > 0
+            ? `<div class="stats-row stats-separator"><span class="dot" style="background:#9b59b6"></span><span>Abs. UrbIS (à vér.)</span><span>${misUrbis.toLocaleString('fr-BE')}</span></div>` +
+              `<div class="stats-row"><span class="dot" style="background:#9ef7e6"></span><span>Abs. UrbIS (vérifiée)</span><span>${misUrbisVer.toLocaleString('fr-BE')}</span></div>`
             : '');
       }
     })
@@ -179,6 +186,7 @@
     'ok',              '#2ecc71',
     'verified_absent', '#3498db',
     'missing_in_urbis','#9b59b6',
+    'missing_in_urbis_verified','#9ef7e6',
     '#e74c3c'
   ];
 
@@ -211,7 +219,7 @@
   map.addControl(new maplibregl.NavigationControl(), 'bottom-left');
 
   // ─── Filters ─────────────────────────────────────
-  const filters = { ok: false, missing: true, verified_absent: false, missing_in_urbis: false };
+  const filters = { ok: false, missing: true, verified_absent: false, missing_in_urbis: false, missing_in_urbis_verified: false };
 
   function applyFilters() {
     if (!map.getLayer('addresses-points')) return;
@@ -285,7 +293,8 @@
       ok: '✅ Présente dans OSM',
       missing: '❌ Manquante dans OSM',
       verified_absent: '🔵 Vérifiée absente',
-      missing_in_urbis: '🟣 Absente d\'UrbIS'
+      missing_in_urbis: '🟣 Absente d\'UrbIS (à vérifier)',
+      missing_in_urbis_verified: '🟠 Absente d\'UrbIS (vérifiée)'
     };
     const label = statusLabels[pr.status] || pr.status;
 
@@ -359,6 +368,7 @@
   document.getElementById('f-missing').addEventListener('change', e => { filters.missing = e.target.checked; applyFilters(); });
   document.getElementById('f-verified').addEventListener('change', e => { filters.verified_absent = e.target.checked; applyFilters(); });
   document.getElementById('f-missing-urbis').addEventListener('change', e => { filters.missing_in_urbis = e.target.checked; applyFilters(); });
+  document.getElementById('f-missing-urbis-verified').addEventListener('change', e => { filters.missing_in_urbis_verified = e.target.checked; applyFilters(); });
 
   // ─── Lasso tool ──────────────────────────────────
   let lassoActive = false;
@@ -428,6 +438,8 @@
     return inside;
   }
 
+  const NON_EXPORTABLE = new Set(['missing_in_urbis', 'missing_in_urbis_verified']);
+
   function finishLasso() {
     if (lassoPoints.length < 3) return;
 
@@ -442,6 +454,7 @@
       const key = `${coords[0]},${coords[1]}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      if (NON_EXPORTABLE.has(f.properties.status)) continue;
       if (pointInPolygon(coords, polyCoords)) {
         lassoSelectedFeatures.push({
           properties: f.properties,
