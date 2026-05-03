@@ -3,9 +3,9 @@
     "project": {
         "name": "Urbis-BeSt-Address-Brussels-compare-OSM",
         "description": "Comparison tool between official Brussels-Capital Region addresses (UrbIS/BeSt) and OpenStreetMap.",
-        "project_url": "https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM",
+        "project_url": "https://pasloin.github.io/Urbis-BeSt-Address-Brussels-compare-OSM",
         "doc_url": "https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM/blob/master/README.md",
-        "icon_url": "https://example.com/placeholder-icon.png",
+        "icon_url": "https://pasloin.github.io/Urbis-BeSt-Address-Brussels-compare-OSM/assets/img/cecinestpasunerue.png",
         "contact_name": "Raphael PasLoin",
         "contact_email": "raphaelpasloin@proton.me"
     },
