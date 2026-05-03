@@ -97,6 +97,7 @@ class AddressHandler(osmium.SimpleHandler):
                                     'nbr': nbr_raw,
                                     'lat': lat,
                                     'lon': lon,
+                                    'note': tags.get('note', ''),
                                 }
 
         # Handle both not:addr:* and was:addr:* as verified absent
@@ -245,6 +246,11 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
         if osm_only:
             rows = []
             for d in osm_only:
+                note = d.get('note', '') or ''
+                if 'urbis' in note.lower():
+                    status = 'missing_in_urbis_verified'
+                else:
+                    status = 'missing_in_urbis'
                 rows.append({
                     'STRNAMEFRE': d['street'],
                     'STRNAMEDUT': None,
@@ -254,7 +260,7 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
                     'MUNNAMEDUT': None,
                     'INSPIRE_ID': None,
                     'PARENTID': None,
-                    'status': 'missing_in_urbis',
+                    'status': status,
                     'geometry': Point(d['lon'], d['lat']),
                 })
             osm_only_gdf = gpd.GeoDataFrame(rows, geometry='geometry', crs='EPSG:4326')
@@ -276,6 +282,7 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
         'missing': int(counts.get('missing', 0)),
         'verified_absent': int(counts.get('verified_absent', 0)),
         'missing_in_urbis': int(counts.get('missing_in_urbis', 0)),
+        'missing_in_urbis_verified': int(counts.get('missing_in_urbis_verified', 0)),
         'osm_loaded': osm_loaded,
     }
     stats_path = os.path.join(os.path.dirname(pmtiles_path) or '.', 'stats.json')
