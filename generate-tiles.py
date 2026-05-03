@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unicodedata
 import json
+import pandas as pd
 import geopandas as gpd
 import osmium
 from shapely.geometry import Point
@@ -227,11 +228,15 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
                     'status': 'missing_in_urbis',
                     'geometry': Point(d['lon'], d['lat']),
                 })
-            osm_only_gdf = gpd.GeoDataFrame(rows, crs='EPSG:4326')
-            gdf = gpd.GeoDataFrame(
-                __import__('pandas').concat([gdf, osm_only_gdf], ignore_index=True),
-                crs='EPSG:4326',
-            )
+            osm_only_gdf = gpd.GeoDataFrame(rows, geometry='geometry', crs='EPSG:4326')
+            print(f'[REVERSE] osm_only_gdf: {len(osm_only_gdf)} lignes, geom_type: {osm_only_gdf.geometry.geom_type.unique()}')
+            combined = pd.concat([gdf, osm_only_gdf], ignore_index=True)
+            gdf = gpd.GeoDataFrame(combined, geometry='geometry', crs='EPSG:4326')
+            # Sanity check
+            null_geom = gdf.geometry.isna().sum()
+            if null_geom > 0:
+                print(f'[WARN] {null_geom} features sans géométrie, supprimées')
+                gdf = gdf[gdf.geometry.notna()].copy()
 
     # Compute coverage statistics
     counts = gdf['status'].value_counts().to_dict()
