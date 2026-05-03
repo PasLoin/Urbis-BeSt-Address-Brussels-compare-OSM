@@ -241,37 +241,40 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
     osm_only_count = 0
     if osm_loaded:
         boundary = load_boundary()
-        osm_only = find_osm_only(gdf, osm_addrs, osm_details, alias_map, boundary)
-        osm_only_count = len(osm_only)
-        if osm_only:
-            rows = []
-            for d in osm_only:
-                note = d.get('note', '') or ''
-                if 'urbis' in note.lower():
-                    status = 'missing_in_urbis_verified'
-                else:
-                    status = 'missing_in_urbis'
-                rows.append({
-                    'STRNAMEFRE': d['street'],
-                    'STRNAMEDUT': None,
-                    'POLICENUM': d['nbr'],
-                    'ZIPCODE': None,
-                    'MUNNAMEFRE': None,
-                    'MUNNAMEDUT': None,
-                    'INSPIRE_ID': None,
-                    'PARENTID': None,
-                    'status': status,
-                    'geometry': Point(d['lon'], d['lat']),
-                })
-            osm_only_gdf = gpd.GeoDataFrame(rows, geometry='geometry', crs='EPSG:4326')
-            print(f'[REVERSE] osm_only_gdf: {len(osm_only_gdf)} lignes, geom_type: {osm_only_gdf.geometry.geom_type.unique()}')
-            combined = pd.concat([gdf, osm_only_gdf], ignore_index=True)
-            gdf = gpd.GeoDataFrame(combined, geometry='geometry', crs='EPSG:4326')
-            # Sanity check
-            null_geom = gdf.geometry.isna().sum()
-            if null_geom > 0:
-                print(f'[WARN] {null_geom} features sans géométrie, supprimées')
-                gdf = gdf[gdf.geometry.notna()].copy()
+        if boundary is None:
+            print('[WARN] Reverse matching ignoré : frontière indisponible')
+        else:
+            osm_only = find_osm_only(gdf, osm_addrs, osm_details, alias_map, boundary)
+            osm_only_count = len(osm_only)
+            if osm_only:
+                rows = []
+                for d in osm_only:
+                    note = d.get('note', '') or ''
+                    if 'urbis' in note.lower():
+                        status = 'missing_in_urbis_verified'
+                    else:
+                        status = 'missing_in_urbis'
+                    rows.append({
+                        'STRNAMEFRE': d['street'],
+                        'STRNAMEDUT': None,
+                        'POLICENUM': d['nbr'],
+                        'ZIPCODE': None,
+                        'MUNNAMEFRE': None,
+                        'MUNNAMEDUT': None,
+                        'INSPIRE_ID': None,
+                        'PARENTID': None,
+                        'status': status,
+                        'geometry': Point(d['lon'], d['lat']),
+                    })
+                osm_only_gdf = gpd.GeoDataFrame(rows, geometry='geometry', crs='EPSG:4326')
+                print(f'[REVERSE] osm_only_gdf: {len(osm_only_gdf)} lignes, geom_type: {osm_only_gdf.geometry.geom_type.unique()}')
+                combined = pd.concat([gdf, osm_only_gdf], ignore_index=True)
+                gdf = gpd.GeoDataFrame(combined, geometry='geometry', crs='EPSG:4326')
+                # Sanity check
+                null_geom = gdf.geometry.isna().sum()
+                if null_geom > 0:
+                    print(f'[WARN] {null_geom} features sans géométrie, supprimées')
+                    gdf = gdf[gdf.geometry.notna()].copy()
 
     # Compute coverage statistics
     counts = gdf['status'].value_counts().to_dict()
