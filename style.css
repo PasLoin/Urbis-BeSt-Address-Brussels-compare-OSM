@@ -47,6 +47,11 @@ html, body, #map { height: 100%; margin: 0; }
 .stats-row .dot { width: 10px; height: 10px; margin-right: 4px; }
 .stats-row span:last-child { margin-left: auto; font-variant-numeric: tabular-nums; }
 .stats-row strong { margin-left: auto; font-variant-numeric: tabular-nums; }
+.stats-row.stats-separator {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #ddd;
+}
 
 #versions {
   margin-top: 12px; padding-top: 10px; border-top: 1px solid #eee;
