@@ -56,11 +56,27 @@
         },
         {
             "key": "alt_name",
-            "description": "Alternative street name used for matching (including :fr and :nl linguistic variants)."
+            "description": "Alternative street name used for matching."
+        },
+        {
+            "key": "alt_name:fr",
+            "description": "French alternative street name used for matching."
+        },
+        {
+            "key": "alt_name:nl",
+            "description": "Dutch alternative street name used for matching."
         },
         {
             "key": "official_name",
-            "description": "Official street name used for matching (including :fr and :nl linguistic variants)."
+            "description": "Official street name used for matching."
+        },
+        {
+            "key": "official_name:fr",
+            "description": "French official street name used for matching."
+        },
+        {
+            "key": "official_name:nl",
+            "description": "Dutch official street name used for matching."
         },
         {
             "key": "old_name",
@@ -77,6 +93,10 @@
         {
             "key": "name:right",
             "description": "Name for the right side of the street used for matching."
+        },
+        {
+            "key": "note",
+            "description": "Used to identify addresses verified as missing in UrbIS if the note contains the word 'urbis'."
         },
         {
             "key": "type",
