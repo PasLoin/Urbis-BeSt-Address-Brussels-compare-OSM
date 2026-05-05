@@ -10,9 +10,11 @@ Spotting addresses that are missing from OSM, with quick visual context on an OS
 
 The basemap uses standard OSM raster tiles. Address data comes from a PMTiles vector layer, and each address gets a status assigned at generation time:
 
-- `ok` — address exists in OSM
-- `missing` — address not found in OSM
-- `verified_absent` — a contributor has checked on the ground and confirmed the address doesn't physically exist
+- `ok` - address exists in OSM
+- `missing` - address not found in OSM
+- `verified_absent` - a contributor has checked on the ground and confirmed the address doesn't physically exist
+- `Absente d'UrbIS (à vérifier)` - address exist in OSM but not in Ubis Address
+- `Absente d'UrbIS (vérifiée)` - address exist in OSM AND is verified by a contributor as existing on the ground  but not in Ubis Address
 
 Use the filter panel to isolate the addresses you care about — typically `missing` is the most useful when looking for things to fix.
 
