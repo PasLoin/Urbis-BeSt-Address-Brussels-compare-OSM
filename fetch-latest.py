@@ -9,7 +9,17 @@ import json
 from datetime import datetime
 
 FEED_URL  = 'https://urbisdownload.datastore.brussels/atomfeed/2cf42541-1813-11ef-8a81-00090ffe0001-en.xml'
-STATE_URL = 'https://download.openstreetmap.fr/extracts/europe/belgium/brussels_capital_region.state.txt'
+
+### 
+##OSM_PBF_URL   = 'https://download.openstreetmap.fr/extracts/europe/belgium/brussels_capital_region-latest.osm.pbf'
+##OSM_STATE_URL = 'https://download.openstreetmap.fr/extracts/europe/belgium/brussels_capital_region.state.txt'
+
+# 
+OSM_PBF_URL   = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/Brussels-daily.pbf'
+OSM_STATE_URL = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/state.txt'
+
+OSM_PBF_FILE  = 'brussels_capital_region-latest.osm.pbf'
+
 ATOM_NS   = 'http://www.w3.org/2005/Atom'
 HEADERS   = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
 
@@ -38,18 +48,50 @@ def find_latest_gpkg(feed_url):
     return latest_dt, latest_url
 
 def fetch_osm_date():
+    
     print('[OSM] Récupération du timestamp OSM...')
     try:
-        with urllib.request.urlopen(STATE_URL, timeout=10) as r:
-            content = r.read().decode()
+        req = urllib.request.Request(OSM_STATE_URL, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=10) as r:
+            content = r.read().decode().strip()
+
+        # parsing JSON d'abord 
+        try:
+            data = json.loads(content)
+            ts = data.get('timestamp', '')
+            if ts:
+                print(f'[OSM] Timestamp (JSON) : {ts}')
+                return ts
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Fallback : format key=value 
         for line in content.splitlines():
             if line.startswith('timestamp='):
                 ts = line.split('=', 1)[1].replace('\\:', ':').strip()
-                print(f'[OSM] Timestamp : {ts}')
+                print(f'[OSM] Timestamp (key=value) : {ts}')
                 return ts
+
     except Exception as e:
         print(f'[WARN] Impossible de récupérer le timestamp OSM : {e}')
     return None
+
+def download_osm_pbf():
+    """Télécharge le fichier PBF OSM depuis OSM_PBF_URL."""
+    print(f'[OSM] Téléchargement du PBF depuis {OSM_PBF_URL}...')
+    req = urllib.request.Request(OSM_PBF_URL, headers=HEADERS)
+    with urllib.request.urlopen(req, timeout=300) as r:
+        total = int(r.headers.get('Content-Length', 0))
+        downloaded = 0
+        with open(OSM_PBF_FILE, 'wb') as f:
+            while chunk := r.read(65536):
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total > 0:
+                    pct = min(downloaded * 100 // total, 100)
+                    print(f'\r    {pct}%', end='', flush=True)
+    print()
+    print(f'[OSM] Sauvegardé : {OSM_PBF_FILE}')
 
 def download(url, dest):
     print(f'[DL] Téléchargement de {os.path.basename(url)}...')
@@ -100,6 +142,10 @@ if __name__ == '__main__':
     else:
         print(f'[DL] Déjà présent, téléchargement ignoré : {zip_name}')
     gpkg_path = extract_gpkg(zip_name)
+
+    # Télécharger le PBF OSM (remplace le wget du pipeline)
+    download_osm_pbf()
+
     print(f'\n[TILES] Génération des PMTiles...')
     run('generate-tiles.py', gpkg_path, 'addresses.pmtiles')
 
