@@ -18,7 +18,7 @@ FEED_URL  = 'https://urbisdownload.datastore.brussels/atomfeed/2cf42541-1813-11e
 OSM_PBF_URL   = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/Brussels-daily.pbf'
 OSM_STATE_URL = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/state.txt'
 
-OSM_PBF_FILE  = 'brussels.osm.pbf'
+OSM_PBF_FILE  = 'brussels_capital_region-latest.osm.pbf'
 
 ATOM_NS   = 'http://www.w3.org/2005/Atom'
 HEADERS   = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
