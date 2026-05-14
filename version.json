@@ -1,1 +1,1 @@
-{"urbis_date": "2026-05-02", "osm_date": "2026-05-11T01:37:23Z", "stats": {"total": 226612, "ok": 220268, "missing": 5715, "verified_absent": 629, "missing_in_urbis": 2888, "missing_in_urbis_verified": 126, "osm_loaded": true}}
+{"urbis_date": "2026-05-02", "osm_date": "2026-05-14T00:13:43Z", "stats": {"total": 226612, "ok": 0, "missing": 226612, "verified_absent": 0, "missing_in_urbis": 0, "missing_in_urbis_verified": 0, "osm_loaded": false}}
