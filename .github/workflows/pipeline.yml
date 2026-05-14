@@ -10,13 +10,13 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y tippecanoe osmium-tool libosmium2-dev libgdal-dev g++ python3-dev
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
           cache: 'pip'
