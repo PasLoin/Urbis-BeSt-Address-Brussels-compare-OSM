@@ -11,12 +11,12 @@ from datetime import datetime
 FEED_URL  = 'https://urbisdownload.datastore.brussels/atomfeed/2cf42541-1813-11ef-8a81-00090ffe0001-en.xml'
 
 ### 
-##OSM_PBF_URL   = 'https://download.openstreetmap.fr/extracts/europe/belgium/brussels_capital_region-latest.osm.pbf'
-##OSM_STATE_URL = 'https://download.openstreetmap.fr/extracts/europe/belgium/brussels_capital_region.state.txt'
+OSM_PBF_URL   = 'https://download.openstreetmap.fr/extracts/europe/belgium/brussels_capital_region-latest.osm.pbf'
+OSM_STATE_URL = 'https://download.openstreetmap.fr/extracts/europe/belgium/brussels_capital_region.state.txt'
 
 # 
-OSM_PBF_URL   = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/Brussels-daily.pbf'
-OSM_STATE_URL = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/state.txt'
+##OSM_PBF_URL   = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/Brussels-daily.pbf'
+##OSM_STATE_URL = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/state.txt'
 
 OSM_PBF_FILE  = 'brussels_capital_region-latest.osm.pbf'
 
