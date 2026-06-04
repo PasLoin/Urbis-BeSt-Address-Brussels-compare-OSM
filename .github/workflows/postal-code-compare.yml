@@ -1,0 +1,42 @@
+name: Postal Code Comparison (UrbIS vs OSM)
+
+on:
+  schedule:
+    - cron: '15 15 15 * *'
+  workflow_dispatch:
+
+jobs:
+  compare-postal-codes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev python3-dev
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install geopandas pyogrio osmium requests
+
+      - name: Download UrbIS GPKG
+        run: python3 fetch-latest.py --no-tiles
+
+      - name: Run postal code comparison
+        run: python3 compare-postal-codes.py
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: postal-code-report-${{ github.run_id }}
+          path: postal_code_report_*.txt
+          retention-days: 90
