@@ -187,10 +187,18 @@ def lookup_best_zipcode(street, housenumber, best_index):
 # OSM pass 1 : polygones boundary=postal_code
 # ---------------------------------------------------------------------------
 
-class PostalCodeWayCollector(osmium.SimpleHandler):
+class PostalCodeHandler(osmium.SimpleHandler):
+    """
+    Collecte en une seule passe :
+    - les relations boundary=postal_code (way members + tags)
+    - les coords de tous les ways nécessaires
+    """
     def __init__(self):
         super().__init__()
-        self.ways = {}
+        self.relations   = {}   # pc → list of (way_id, role)
+        self.relation_ids = {}  # pc → osm relation id
+        self.ways        = {}   # way_id → [(lon, lat), ...]
+
     def way(self, w):
         coords = []
         for n in w.nodes:
@@ -199,61 +207,133 @@ class PostalCodeWayCollector(osmium.SimpleHandler):
         if coords:
             self.ways[w.id] = coords
 
-
-class PostalCodeRelationCollector(osmium.SimpleHandler):
-    def __init__(self):
-        super().__init__()
-        self.relations   = {}
-        self.relation_ids = {}
     def relation(self, r):
         tags = r.tags
         if tags.get('type') != 'boundary' or tags.get('boundary') != 'postal_code':
             return
         pc = (tags.get('postal_code') or tags.get('ref') or '').strip()
         if pc.isdigit() and len(pc) == 4:
-            self.relations[pc]    = [m.ref for m in r.members if m.type == 'w']
+            self.relations[pc]    = [(m.ref, m.role) for m in r.members if m.type == 'w']
             self.relation_ids[pc] = r.id
+
+
+def _chain_ways(segments):
+    """
+    Assemble une liste de segments (listes de coordonnées) en anneaux fermés.
+    Retourne une liste d'anneaux (chaque anneau = liste de (lon,lat) fermée).
+    """
+    # Copie pour pouvoir retirer les segments utilisés
+    segs = [list(s) for s in segments if len(s) >= 2]
+    rings = []
+
+    while segs:
+        # Démarrer un nouvel anneau avec le premier segment disponible
+        ring = list(segs.pop(0))
+        changed = True
+        while changed:
+            changed = False
+            for i, seg in enumerate(segs):
+                if not seg:
+                    continue
+                # Essayer de connecter seg (ou son inverse) à la fin de l'anneau
+                if _close_enough(ring[-1], seg[0]):
+                    ring.extend(seg[1:])
+                    segs.pop(i)
+                    changed = True
+                    break
+                elif _close_enough(ring[-1], seg[-1]):
+                    ring.extend(reversed(seg[:-1]))
+                    segs.pop(i)
+                    changed = True
+                    break
+                # Essayer de connecter au début de l'anneau
+                elif _close_enough(ring[0], seg[-1]):
+                    ring = seg[:-1] + ring
+                    segs.pop(i)
+                    changed = True
+                    break
+                elif _close_enough(ring[0], seg[0]):
+                    ring = list(reversed(seg[1:])) + ring
+                    segs.pop(i)
+                    changed = True
+                    break
+        # Fermer l'anneau si nécessaire
+        if len(ring) >= 3 and not _close_enough(ring[0], ring[-1]):
+            ring.append(ring[0])
+        if len(ring) >= 4:
+            rings.append(ring)
+
+    return rings
+
+
+def _close_enough(p1, p2, tol=1e-7):
+    return abs(p1[0]-p2[0]) < tol and abs(p1[1]-p2[1]) < tol
 
 
 def build_postal_polygons(pbf_path):
     print('[PC] Collecte des relations boundary=postal_code...')
-    rc = PostalCodeRelationCollector()
-    rc.apply_file(pbf_path)
-    print(f'[PC] {len(rc.relations)} relations trouvées')
-    if not rc.relations:
+    handler = PostalCodeHandler()
+    handler.apply_file(pbf_path, locations=True)
+    print(f'[PC] {len(handler.relations)} relations trouvées')
+    if not handler.relations:
         return {}, {}
-    wc = PostalCodeWayCollector()
-    wc.apply_file(pbf_path, locations=True)
+
     postal_polygons = {}
-    for pc, way_ids in rc.relations.items():
-        rings = []
-        for wid in way_ids:
-            coords = wc.ways.get(wid, [])
-            if len(coords) >= 3:
-                if coords[0] != coords[-1]:
-                    coords = coords + [coords[0]]
-                rings.append(coords)
-        if not rings:
+    for pc, way_refs in handler.relations.items():
+        # Récupérer les segments dans l'ordre (outer en premier, inner ensuite)
+        outer_segs = []
+        inner_segs = []
+        for wid, role in way_refs:
+            coords = handler.ways.get(wid, [])
+            if len(coords) < 2:
+                continue
+            if role == 'inner':
+                inner_segs.append(coords)
+            else:
+                outer_segs.append(coords)
+
+        if not outer_segs:
             continue
+
         try:
+            outer_rings = _chain_ways(outer_segs)
+            inner_rings = _chain_ways(inner_segs)
+
+            if not outer_rings:
+                continue
+
+            from shapely.geometry import LinearRing
             polys = []
-            for r in rings:
-                if len(r) >= 4:
-                    p = Polygon(r)
-                    # Corriger les géométries invalides (auto-intersections, anneaux mal orientés)
-                    if not p.is_valid:
-                        p = p.buffer(0)
-                    if not p.is_empty:
-                        polys.append(p)
+            for oring in outer_rings:
+                holes = []
+                for iring in inner_rings:
+                    try:
+                        hole = Polygon(iring)
+                        if not hole.is_valid:
+                            hole = hole.buffer(0)
+                        if not hole.is_empty:
+                            holes.append(hole.exterior.coords)
+                    except Exception:
+                        pass
+                try:
+                    p = Polygon(oring, holes)
+                except Exception:
+                    p = Polygon(oring)
+                if not p.is_valid:
+                    p = p.buffer(0)
+                if not p.is_empty:
+                    polys.append(p)
+
             if polys:
-                geom = unary_union(polys)
+                geom = unary_union(polys) if len(polys) > 1 else polys[0]
                 if not geom.is_valid:
                     geom = geom.buffer(0)
                 postal_polygons[pc] = geom
         except Exception as e:
             print(f'[WARN] Polygone {pc} ignoré : {e}')
+
     print(f'[PC] {len(postal_polygons)} polygones construits')
-    return postal_polygons, rc.relation_ids
+    return postal_polygons, handler.relation_ids
 
 
 def find_postal_code(lon, lat, postal_polygons, prepared_cache):
