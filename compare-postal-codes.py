@@ -124,13 +124,21 @@ def extract_gpkg(zip_path):
 # BeSt : index (norm_street, norm_nbr) → postal_code
 # ---------------------------------------------------------------------------
 
+def _oid(val):
+    """Convertit un objectidentifier Real GPKG (ex: 12340.0) en str entier propre."""
+    try:
+        return str(int(float(val)))
+    except (ValueError, TypeError):
+        return str(val).strip()
+
+
 def load_best_index(gpkg_path):
     print(f'[BeSt] Lecture de {gpkg_path}...')
 
     streets_gdf = gpd.read_file(gpkg_path, layer='BrusselsStreetname_04000')
     street_map = {}
     for _, row in streets_gdf.iterrows():
-        oid = str(row['objectidentifier']).strip().rstrip('.0')
+        oid = _oid(row['objectidentifier'])
         fr  = str(row.get('spelling_fr') or '').strip()
         nl  = str(row.get('spelling_nl') or '').strip()
         street_map[oid] = (fr, nl)
@@ -151,7 +159,7 @@ def load_best_index(gpkg_path):
         if not (pc.isdigit() and len(pc) == 4):
             skipped += 1
             continue
-        street_oid = str(row.get('hasstreetname_objectidentifier') or '').strip().rstrip('.0')
+        street_oid = _oid(row.get('hasstreetname_objectidentifier'))
         names = street_map.get(street_oid, ('', ''))
         norm_nbr = normalize(nbr)
         for raw_name in names:
