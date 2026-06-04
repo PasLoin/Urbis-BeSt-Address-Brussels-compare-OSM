@@ -236,11 +236,22 @@ def build_postal_polygons(pbf_path):
         if not rings:
             continue
         try:
-            polys = [Polygon(r) for r in rings if len(r) >= 4]
+            polys = []
+            for r in rings:
+                if len(r) >= 4:
+                    p = Polygon(r)
+                    # Corriger les géométries invalides (auto-intersections, anneaux mal orientés)
+                    if not p.is_valid:
+                        p = p.buffer(0)
+                    if not p.is_empty:
+                        polys.append(p)
             if polys:
-                postal_polygons[pc] = unary_union(polys)
+                geom = unary_union(polys)
+                if not geom.is_valid:
+                    geom = geom.buffer(0)
+                postal_polygons[pc] = geom
         except Exception as e:
-            print(f'[WARN] Polygone {pc} : {e}')
+            print(f'[WARN] Polygone {pc} ignoré : {e}')
     print(f'[PC] {len(postal_polygons)} polygones construits')
     return postal_polygons, rc.relation_ids
 
