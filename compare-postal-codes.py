@@ -239,11 +239,23 @@ def build_postal_polygons(pbf_path):
 
 def find_postal_code(lon, lat, postal_polygons, prepared_cache):
     pt = Point(lon, lat)
+    # Passe 1 : covers (inclut les points sur la frontière)
     for pc, geom in postal_polygons.items():
         if pc not in prepared_cache:
             prepared_cache[pc] = prep(geom)
-        if prepared_cache[pc].contains(pt):
+        if prepared_cache[pc].covers(pt):
             return pc
+    # Passe 2 : fallback sur le polygone le plus proche (cas limite de frontière)
+    best_pc   = None
+    best_dist = float('inf')
+    for pc, geom in postal_polygons.items():
+        d = geom.distance(pt)
+        if d < best_dist:
+            best_dist = d
+            best_pc   = pc
+    # N'utiliser le fallback que si le point est très proche d'une frontière (< 10m en degrés ≈ 0.0001°)
+    if best_pc is not None and best_dist < 0.0001:
+        return best_pc
     return None
 
 
