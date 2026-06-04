@@ -121,34 +121,33 @@ def extract_gpkg(zip_path):
 
 
 # ---------------------------------------------------------------------------
-# BeSt : index (norm_street, norm_nbr) → postal_code
+# BeSt : index spatial (lon_wgs84, lat_wgs84, norm_housenumber) → postal_code
+#
+# Approche : spatial join par proximité de point.
+# Le GPKG BeSt contient les colonnes x,y en Lambert 31370.
+# On reprojette en WGS84 et on indexe dans un KDTree pour lookup rapide.
+# Pour chaque adresse OSM on cherche le point BeSt le plus proche
+# avec le même numéro normalisé, dans un rayon de 50m.
 # ---------------------------------------------------------------------------
 
-def _oid(val):
-    """Convertit un objectidentifier Real GPKG (ex: 12340.0) en str entier propre."""
-    try:
-        return str(int(float(val)))
-    except (ValueError, TypeError):
-        return str(val).strip()
+from scipy.spatial import cKDTree
+import numpy as np
+from pyproj import Transformer
+
+_TRANSFORMER = Transformer.from_crs("EPSG:31370", "EPSG:4326", always_xy=True)
 
 
-def load_best_index(gpkg_path):
-    print(f'[BeSt] Lecture de {gpkg_path}...')
-
-    streets_gdf = gpd.read_file(gpkg_path, layer='BrusselsStreetname_04000')
-    street_map = {}
-    for _, row in streets_gdf.iterrows():
-        oid = _oid(row['objectidentifier'])
-        fr  = str(row.get('spelling_fr') or '').strip()
-        nl  = str(row.get('spelling_nl') or '').strip()
-        street_map[oid] = (fr, nl)
-    print(f'[BeSt] {len(street_map)} rues chargées')
-
+def load_best_spatial_index(gpkg_path):
+    """
+    Retourne (kdtree, lons, lats, norm_nbrs, postcodes) sur les adresses BeSt current.
+    KDTree indexé sur (lon, lat) WGS84.
+    """
+    print(f'[BeSt] Lecture spatiale de {gpkg_path}...')
     addr_gdf = gpd.read_file(gpkg_path, layer='BrusselsAddressL72_04000')
     if 'status' in addr_gdf.columns:
         addr_gdf = addr_gdf[addr_gdf['status'].str.lower().str.contains('current', na=False)]
 
-    index = {}
+    lons, lats, norm_nbrs, postcodes = [], [], [], []
     skipped = 0
     for _, row in addr_gdf.iterrows():
         nbr = str(row.get('housenumber') or '').strip()
@@ -159,28 +158,49 @@ def load_best_index(gpkg_path):
         if not (pc.isdigit() and len(pc) == 4):
             skipped += 1
             continue
-        street_oid = _oid(row.get('hasstreetname_objectidentifier'))
-        names = street_map.get(street_oid, ('', ''))
-        norm_nbr = normalize(nbr)
-        for raw_name in names:
-            if not raw_name:
-                continue
-            for variant in split_bilingual(raw_name):
-                key = (variant, norm_nbr)
-                if key not in index:
-                    index[key] = pc
+        x = row.get('x')
+        y = row.get('y')
+        if x is None or y is None or (x == 0 and y == 0):
+            skipped += 1
+            continue
+        try:
+            lon, lat = _TRANSFORMER.transform(float(x), float(y))
+        except Exception:
+            skipped += 1
+            continue
+        lons.append(lon)
+        lats.append(lat)
+        norm_nbrs.append(normalize(nbr))
+        postcodes.append(pc)
 
-    print(f'[BeSt] {len(index)} entrées dans l\'index rue+numéro ({skipped} ignorées)')
-    return index
+    lons = np.array(lons)
+    lats = np.array(lats)
+    coords = np.column_stack([lons, lats])
+    tree = cKDTree(coords)
+    print(f'[BeSt] {len(lons)} adresses indexées ({skipped} ignorées)')
+    return tree, lons, lats, norm_nbrs, postcodes
 
 
-def lookup_best_zipcode(street, housenumber, best_index):
-    norm_nbr = normalize(housenumber)
-    for part in ([normalize(street)] + split_bilingual(street)):
-        zc = best_index.get((part, norm_nbr))
-        if zc:
-            return zc
-    return None
+# Rayon de recherche en degrés (~50m à Bruxelles : 0.00045°)
+_SEARCH_RADIUS_DEG = 0.00045
+
+
+def lookup_best_zipcode(lon, lat, norm_nbr, tree, lons, lats, norm_nbrs, postcodes):
+    """
+    Cherche dans le KDTree BeSt le point le plus proche du point OSM (lon, lat)
+    ayant le même numéro normalisé, dans un rayon de 50m.
+    Retourne le code postal BeSt ou None.
+    """
+    idxs = tree.query_ball_point([lon, lat], r=_SEARCH_RADIUS_DEG)
+    if not idxs:
+        return None
+    # Parmi les candidats, garder ceux avec le même numéro normalisé
+    matches = [i for i in idxs if norm_nbrs[i] == norm_nbr]
+    if not matches:
+        return None
+    # Prendre le plus proche
+    best = min(matches, key=lambda i: (lons[i]-lon)**2 + (lats[i]-lat)**2)
+    return postcodes[best]
 
 
 # ---------------------------------------------------------------------------
@@ -543,8 +563,8 @@ if __name__ == '__main__':
     # 4. Adresses OSM
     osm_addresses, anomalies_postcode_tag = load_osm_addresses(OSM_PBF_FILE)
 
-    # 5. Index BeSt
-    best_index = load_best_index(gpkg_path)
+    # 5. Index spatial BeSt
+    best_tree, best_lons, best_lats, best_norm_nbrs, best_postcodes =         load_best_spatial_index(gpkg_path)
 
     # 6. Analyse
     print('[ANALYSE] Calcul spatial et comparaison CP...')
@@ -559,8 +579,11 @@ if __name__ == '__main__':
             print(f'\r    {i}/{len(osm_addresses)}', end='', flush=True)
         cp_osm  = find_postal_code(addr['lon'], addr['lat'],
                                    postal_polygons, prepared_cache)
-        cp_best = lookup_best_zipcode(addr['street'], addr['housenumber'],
-                                      best_index)
+        norm_nbr = normalize(addr['housenumber'])
+        cp_best = lookup_best_zipcode(
+            addr['lon'], addr['lat'], norm_nbr,
+            best_tree, best_lons, best_lats, best_norm_nbrs, best_postcodes
+        )
         addr['cp_osm']  = cp_osm
         addr['cp_best'] = cp_best
 
