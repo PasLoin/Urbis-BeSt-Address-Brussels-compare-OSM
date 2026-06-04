@@ -8,15 +8,18 @@ Pour chaque adresse OSM dans la région bruxelloise :
   2. Code postal calculé spatialement (point-in-polygon dans les relations
      boundary=postal_code OSM)
   3. Match avec le code postal BeSt (haspostalinfo_objectidentifier) via
-     join sur le nom de rue normalisé + numéro
+     join spatial sur (lon, lat) + numéro normalisé
   4. Si mismatch → inclus dans le rapport "CP à vérifier"
 
-Source BeSt : GPKG sectionID=04000, URL directe (pas de feed — bloqué sur GitHub Actions)
-  Pattern : .../BeSt/FullDownload/GPKG/BeStBrussels_31370_GPKG_04000_YYYYMMDD.zip
-  Le script essaie les 30 derniers jours jusqu'à trouver un fichier disponible.
+En plus du rapport texte, le script exporte un GeoJSON par code postal OSM
+(plus un combiné) dans `postal_codes_geojson/` pour debug visuel
+(JOSM, QGIS, geojson.io…).
 
-Source OSM : PBF Brussels daily
-Sortie    : postal_code_report_YYYY-MM-DD.txt
+Source BeSt : GPKG sectionID=04000, URL directe.
+Source OSM  : PBF Brussels daily.
+Sortie      : postal_code_report_YYYY-MM-DD.txt
+              postal_codes_geojson/postal_code_XXXX.geojson  (un par CP)
+              postal_codes_geojson/_all_postal_codes.geojson (combiné)
 """
 
 import sys
@@ -39,6 +42,8 @@ GPKG_BASE_URL = 'https://urbisdownload.datastore.brussels/BeSt/FullDownload/GPKG
 OSM_PBF_URL   = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/Brussels-daily.pbf'
 OSM_PBF_FILE  = 'brussels_capital_region-latest.osm.pbf'
 HEADERS       = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
+
+GEOJSON_DIR   = 'postal_codes_geojson'
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +71,6 @@ def split_bilingual(s):
 def find_latest_best_gpkg_url(max_days=60):
     """
     Cherche le GPKG 04000 le plus récent en testant les dates des 60 derniers jours.
-    Contourne le timeout sur le feed ATOM depuis GitHub Actions.
     """
     print('[BeSt] Recherche du GPKG 04000 le plus récent...')
     today = date.today()
@@ -122,12 +126,6 @@ def extract_gpkg(zip_path):
 
 # ---------------------------------------------------------------------------
 # BeSt : index spatial (lon_wgs84, lat_wgs84, norm_housenumber) → postal_code
-#
-# Approche : spatial join par proximité de point.
-# Le GPKG BeSt contient les colonnes x,y en Lambert 31370.
-# On reprojette en WGS84 et on indexe dans un KDTree pour lookup rapide.
-# Pour chaque adresse OSM on cherche le point BeSt le plus proche
-# avec le même numéro normalisé, dans un rayon de 50m.
 # ---------------------------------------------------------------------------
 
 from scipy.spatial import cKDTree
@@ -194,11 +192,9 @@ def lookup_best_zipcode(lon, lat, norm_nbr, tree, lons, lats, norm_nbrs, postcod
     idxs = tree.query_ball_point([lon, lat], r=_SEARCH_RADIUS_DEG)
     if not idxs:
         return None
-    # Parmi les candidats, garder ceux avec le même numéro normalisé
     matches = [i for i in idxs if norm_nbrs[i] == norm_nbr]
     if not matches:
         return None
-    # Prendre le plus proche
     best = min(matches, key=lambda i: (lons[i]-lon)**2 + (lats[i]-lat)**2)
     return postcodes[best]
 
@@ -242,12 +238,10 @@ def _chain_ways(segments):
     Assemble une liste de segments (listes de coordonnées) en anneaux fermés.
     Retourne une liste d'anneaux (chaque anneau = liste de (lon,lat) fermée).
     """
-    # Copie pour pouvoir retirer les segments utilisés
     segs = [list(s) for s in segments if len(s) >= 2]
     rings = []
 
     while segs:
-        # Démarrer un nouvel anneau avec le premier segment disponible
         ring = list(segs.pop(0))
         changed = True
         while changed:
@@ -255,7 +249,6 @@ def _chain_ways(segments):
             for i, seg in enumerate(segs):
                 if not seg:
                     continue
-                # Essayer de connecter seg (ou son inverse) à la fin de l'anneau
                 if _close_enough(ring[-1], seg[0]):
                     ring.extend(seg[1:])
                     segs.pop(i)
@@ -266,7 +259,6 @@ def _chain_ways(segments):
                     segs.pop(i)
                     changed = True
                     break
-                # Essayer de connecter au début de l'anneau
                 elif _close_enough(ring[0], seg[-1]):
                     ring = seg[:-1] + ring
                     segs.pop(i)
@@ -277,7 +269,6 @@ def _chain_ways(segments):
                     segs.pop(i)
                     changed = True
                     break
-        # Fermer l'anneau si nécessaire
         if len(ring) >= 3 and not _close_enough(ring[0], ring[-1]):
             ring.append(ring[0])
         if len(ring) >= 4:
@@ -290,7 +281,24 @@ def _close_enough(p1, p2, tol=1e-7):
     return abs(p1[0]-p2[0]) < tol and abs(p1[1]-p2[1]) < tol
 
 
+def _safe_polygon(coords):
+    """Construit un Polygon valide depuis une liste de coords, en réparant si besoin."""
+    try:
+        p = Polygon(coords)
+    except Exception:
+        return None
+    if not p.is_valid:
+        p = p.buffer(0)
+    if p.is_empty:
+        return None
+    return p
+
+
 def build_postal_polygons(pbf_path):
+    """
+    Construit les polygones boundary=postal_code à partir du PBF.
+    Assigne correctement chaque inner ring à l'outer qui le contient.
+    """
     print('[PC] Collecte des relations boundary=postal_code...')
     handler = PostalCodeHandler()
     handler.apply_file(pbf_path, locations=True)
@@ -300,7 +308,6 @@ def build_postal_polygons(pbf_path):
 
     postal_polygons = {}
     for pc, way_refs in handler.relations.items():
-        # Récupérer les segments dans l'ordre (outer en premier, inner ensuite)
         outer_segs = []
         inner_segs = []
         for wid, role in way_refs:
@@ -313,6 +320,7 @@ def build_postal_polygons(pbf_path):
                 outer_segs.append(coords)
 
         if not outer_segs:
+            print(f'[WARN] CP {pc} : aucun way outer dans la relation')
             continue
 
         try:
@@ -320,27 +328,43 @@ def build_postal_polygons(pbf_path):
             inner_rings = _chain_ways(inner_segs)
 
             if not outer_rings:
+                print(f'[WARN] CP {pc} : impossible d\'assembler les rings outer')
                 continue
 
-            from shapely.geometry import LinearRing
+            # Convertir les inner rings en polygones une fois pour all (pour test de containment)
+            inner_polys = []
+            for iring in inner_rings:
+                ip = _safe_polygon(iring)
+                if ip is not None and ip.geom_type == 'Polygon':
+                    inner_polys.append(ip)
+
             polys = []
             for oring in outer_rings:
-                holes = []
-                for iring in inner_rings:
+                outer_poly = _safe_polygon(oring)
+                if outer_poly is None:
+                    continue
+
+                # Assigner UNIQUEMENT les inner rings contenus dans CET outer
+                holes_coords = []
+                for ip in inner_polys:
+                    if outer_poly.contains(ip):
+                        try:
+                            holes_coords.append(list(ip.exterior.coords))
+                        except AttributeError:
+                            pass  # buffer(0) a transformé en MultiPolygon, on ignore
+
+                if holes_coords:
                     try:
-                        hole = Polygon(iring)
-                        if not hole.is_valid:
-                            hole = hole.buffer(0)
-                        if not hole.is_empty:
-                            holes.append(hole.exterior.coords)
+                        p = Polygon(outer_poly.exterior.coords, holes_coords)
+                        if not p.is_valid:
+                            p = p.buffer(0)
+                        if p.is_empty:
+                            p = outer_poly
                     except Exception:
-                        pass
-                try:
-                    p = Polygon(oring, holes)
-                except Exception:
-                    p = Polygon(oring)
-                if not p.is_valid:
-                    p = p.buffer(0)
+                        p = outer_poly
+                else:
+                    p = outer_poly
+
                 if not p.is_empty:
                     polys.append(p)
 
@@ -354,6 +378,55 @@ def build_postal_polygons(pbf_path):
 
     print(f'[PC] {len(postal_polygons)} polygones construits')
     return postal_polygons, handler.relation_ids
+
+
+def export_postal_polygons_geojson(postal_polygons, relation_ids, output_dir=GEOJSON_DIR):
+    """
+    Debug : exporte chaque polygone postal_code OSM en GeoJSON séparé,
+    plus un fichier combiné `_all_postal_codes.geojson`.
+    À ouvrir dans QGIS, JOSM, geojson.io, …
+    """
+    if not postal_polygons:
+        print('[GEOJSON] Aucun polygone à exporter.')
+        return
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    records = []
+    for pc in sorted(postal_polygons.keys()):
+        geom = postal_polygons[pc]
+        rel_id = relation_ids.get(pc)
+        props = {
+            'postal_code':    pc,
+            'osm_relation_id': rel_id,
+            'osm_url':        f'https://www.openstreetmap.org/relation/{rel_id}' if rel_id else None,
+            'geometry_type': geom.geom_type,
+            'area_deg2':     round(geom.area, 8),
+        }
+        # Fichier individuel
+        try:
+            gdf = gpd.GeoDataFrame([props], geometry=[geom], crs='EPSG:4326')
+            out_path = os.path.join(output_dir, f'postal_code_{pc}.geojson')
+            gdf.to_file(out_path, driver='GeoJSON')
+        except Exception as e:
+            print(f'[WARN] Export GeoJSON {pc} échoué : {e}')
+            continue
+        records.append((props, geom))
+
+    # Fichier combiné
+    if records:
+        try:
+            gdf = gpd.GeoDataFrame(
+                [r[0] for r in records],
+                geometry=[r[1] for r in records],
+                crs='EPSG:4326',
+            )
+            combined_path = os.path.join(output_dir, '_all_postal_codes.geojson')
+            gdf.to_file(combined_path, driver='GeoJSON')
+        except Exception as e:
+            print(f'[WARN] Export GeoJSON combiné échoué : {e}')
+
+    print(f'[GEOJSON] {len(records)} polygones exportés dans {output_dir}/')
 
 
 def find_postal_code(lon, lat, postal_polygons, prepared_cache):
@@ -372,7 +445,6 @@ def find_postal_code(lon, lat, postal_polygons, prepared_cache):
         if d < best_dist:
             best_dist = d
             best_pc   = pc
-    # N'utiliser le fallback que si le point est très proche d'une frontière (< 10m en degrés ≈ 0.0001°)
     if best_pc is not None and best_dist < 0.0001:
         return best_pc
     return None
@@ -558,13 +630,17 @@ if __name__ == '__main__':
         print(f'[INFO] PBF déjà présent : {OSM_PBF_FILE}')
 
     # 3. Polygones postal_code OSM
-    postal_polygons, _ = build_postal_polygons(OSM_PBF_FILE)
+    postal_polygons, relation_ids = build_postal_polygons(OSM_PBF_FILE)
+
+    # 3bis. Export GeoJSON debug (un par CP + un combiné)
+    export_postal_polygons_geojson(postal_polygons, relation_ids)
 
     # 4. Adresses OSM
     osm_addresses, anomalies_postcode_tag = load_osm_addresses(OSM_PBF_FILE)
 
     # 5. Index spatial BeSt
-    best_tree, best_lons, best_lats, best_norm_nbrs, best_postcodes =         load_best_spatial_index(gpkg_path)
+    best_tree, best_lons, best_lats, best_norm_nbrs, best_postcodes = \
+        load_best_spatial_index(gpkg_path)
 
     # 6. Analyse
     print('[ANALYSE] Calcul spatial et comparaison CP...')
