@@ -29,7 +29,8 @@ from shapely.geometry import Point, shape, MultiPolygon, Polygon
 from shapely.prepared import prep
 from shapely.ops import unary_union
 
-FEED_URL     = 'https://urbisdownload.datastore.brussels/atomfeed/2cf42541-1813-11ef-8a81-00090ffe0001-en.xml'
+##FEED_URL     = 'https://urbisdownload.datastore.brussels/atomfeed/2cf42541-1813-11ef-8a81-00090ffe0001-en.xml'
+FEED_URL     = 'https://urbisdownload.datastore.brussels/atomfeed/a8c9ccde-5c2b-11ed-913a-900f0cda5d5c-en.xml'
 OSM_PBF_URL  = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/Brussels-daily.pbf'
 OSM_PBF_FILE = 'brussels_capital_region-latest.osm.pbf'
 ATOM_NS      = 'http://www.w3.org/2005/Atom'
