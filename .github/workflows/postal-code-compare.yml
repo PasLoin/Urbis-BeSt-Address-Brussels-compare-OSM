@@ -1,39 +1,34 @@
 name: Postal Code Comparison (BeSt vs OSM)
-
 on:
   schedule:
     - cron: '15 15 15 * *'
   workflow_dispatch:
-
 jobs:
   compare-postal-codes:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libosmium2-dev libgdal-dev python3-dev
-
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.10'
           cache: 'pip'
-
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install geopandas pyogrio osmium shapely scipy pyproj
-
       - name: Run postal code comparison
         run: python3 compare-postal-codes.py
-
-      - name: Upload report artifact
+      - name: Upload report and debug GeoJSON
         uses: actions/upload-artifact@v4
         with:
           name: postal-code-report-${{ github.run_id }}
-          path: postal_code_report_*.txt
+          path: |
+            postal_code_report_*.txt
+            postal_codes_geojson/**
           retention-days: 90
