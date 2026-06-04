@@ -3,12 +3,23 @@
 compare-postal-codes.py
 
 Pour chaque adresse OSM dans la région bruxelloise :
-  1. Si addr:postcode est présent → loggé en anomalie, puis ignoré (on force le spatial)
-  2. Code postal calculé spatialement (point-in-polygon dans les relations boundary=postal_code)
-  3. Match avec le ZIPCODE de l'adresse correspondante dans UrbIS (rue + numéro)
+  1. Si addr:postcode est présent → loggé en anomalie, puis le code postal
+     est quand même calculé spatialement (on ignore addr:postcode)
+  2. Code postal calculé spatialement (point-in-polygon dans les relations
+     boundary=postal_code OSM)
+  3. Match avec le code postal BeSt (haspostalinfo_objectidentifier) via
+     join sur le nom de rue normalisé + numéro
   4. Si mismatch → inclus dans le rapport "CP à vérifier"
 
-Sortie : rapport texte postal_code_report_YYYY-MM-DD.txt
+Source BeSt : feed ATOM a8c9ccde-5c2b-11ed-913a-900f0cda5d5c
+  GPKG sectionID=04000, type=application/geopackage+sqlite3
+  Couches : BrusselsAddressL72_04000 / BrusselsStreetname_04000
+  Colonnes clés :
+    housenumber, hasstreetname_objectidentifier, haspostalinfo_objectidentifier, status
+    (streetname) spelling_fr, spelling_nl
+
+Source OSM : PBF Brussels daily
+Sortie    : postal_code_report_YYYY-MM-DD.txt
 """
 
 import sys
@@ -21,16 +32,13 @@ import zipfile
 import unicodedata
 import re
 from datetime import datetime, date
-from collections import defaultdict
-
-import osmium
-import geopandas as gpd
-from shapely.geometry import Point, shape, MultiPolygon, Polygon
-from shapely.prepared import prep
+from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
+from shapely.prepared import prep
+import geopandas as gpd
+import osmium
 
-FEED_URL     = 'https://urbisdownload.datastore.brussels/atomfeed/2cf42541-1813-11ef-8a81-00090ffe0001-en.xml'
-##FEED_URL     = 'https://urbisdownload.datastore.brussels/atomfeed/a8c9ccde-5c2b-11ed-913a-900f0cda5d5c-en.xml'
+FEED_URL     = 'https://urbisdownload.datastore.brussels/atomfeed/a8c9ccde-5c2b-11ed-913a-900f0cda5d5c-en.xml'
 OSM_PBF_URL  = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/Brussels-daily.pbf'
 OSM_PBF_FILE = 'brussels_capital_region-latest.osm.pbf'
 ATOM_NS      = 'http://www.w3.org/2005/Atom'
@@ -59,28 +67,31 @@ def split_bilingual(s):
 # Download helpers
 # ---------------------------------------------------------------------------
 
-def find_latest_gpkg(feed_url):
-    print('[FEED] Lecture du feed ATOM...')
+def find_latest_best_gpkg(feed_url):
+    """Retourne (date, url) du GPKG sectionID=04000 le plus récent."""
+    print('[FEED] Lecture du feed ATOM BeSt...')
     req = urllib.request.Request(feed_url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=60) as r:
         xml_data = r.read()
     root = ET.fromstring(xml_data)
     candidates = []
     for link in root.iter(f'{{{ATOM_NS}}}link'):
-        href = link.get('href', '')
-        time = link.get('time', '')
-        if 'GPKG' in href and '_04000_' in href and href.endswith('.zip'):
+        href  = link.get('href', '')
+        time  = link.get('time', '')
+        mime  = link.get('type', '')
+        sid   = link.get('sectionID', '')
+        if sid == '04000' and mime == 'application/geopackage+sqlite3':
             try:
                 dt = datetime.fromisoformat(time.replace('Z', '+00:00'))
                 candidates.append((dt, href))
             except ValueError:
                 pass
     if not candidates:
-        print('[ERREUR] Aucun fichier GPKG 04000 trouvé dans le feed.')
+        print('[ERREUR] Aucun GPKG 04000 trouvé dans le feed.')
         sys.exit(1)
     candidates.sort(reverse=True)
     latest_dt, latest_url = candidates[0]
-    print(f'[FEED] Dernière version : {latest_dt.date()} → {latest_url}')
+    print(f'[FEED] Dernière version GPKG 04000 : {latest_dt.date()} → {latest_url}')
     return latest_dt, latest_url
 
 
@@ -106,12 +117,12 @@ def extract_gpkg(zip_path):
     with zipfile.ZipFile(zip_path, 'r') as z:
         gpkg_files = [f for f in z.namelist() if f.endswith('.gpkg')]
         if not gpkg_files:
-            print('[ERREUR] Aucun fichier .gpkg dans le ZIP.')
+            print('[ERREUR] Aucun .gpkg dans le ZIP.')
             sys.exit(1)
         gpkg_name = gpkg_files[0]
         out_path = os.path.abspath(gpkg_name)
         if not out_path.startswith(os.path.abspath('.') + os.sep):
-            print('[ERREUR] Nom de fichier .gpkg invalide.')
+            print('[ERREUR] Nom .gpkg invalide.')
             sys.exit(1)
         z.extract(gpkg_name, '.')
         print(f'[ZIP] Extrait : {gpkg_name}')
@@ -119,15 +130,81 @@ def extract_gpkg(zip_path):
 
 
 # ---------------------------------------------------------------------------
-# OSM pass 1 : collecter les géométries des relations boundary=postal_code
+# BeSt : index (norm_street, norm_nbr) → postal_code
+# ---------------------------------------------------------------------------
+
+def load_best_index(gpkg_path):
+    """
+    Lit BrusselsAddressL72_04000 et BrusselsStreetname_04000.
+    Retourne un dict (norm_street_variant, norm_housenumber) → postal_code (str).
+    Seules les adresses avec status='current' sont retenues.
+    """
+    print(f'[BeSt] Lecture de {gpkg_path}...')
+
+    # Streetnames : objectidentifier → (spelling_fr, spelling_nl)
+    streets_gdf = gpd.read_file(gpkg_path, layer='BrusselsStreetname_04000')
+    street_map = {}  # objectidentifier (float/str) → (fr, nl)
+    for _, row in streets_gdf.iterrows():
+        oid = str(row['objectidentifier']).strip().rstrip('.0')
+        fr  = str(row.get('spelling_fr') or '').strip()
+        nl  = str(row.get('spelling_nl') or '').strip()
+        street_map[oid] = (fr, nl)
+    print(f'[BeSt] {len(street_map)} rues chargées')
+
+    # Addresses
+    addr_gdf = gpd.read_file(gpkg_path, layer='BrusselsAddressL72_04000')
+    # Garder seulement les adresses courantes
+    if 'status' in addr_gdf.columns:
+        addr_gdf = addr_gdf[addr_gdf['status'].str.lower().str.contains('current', na=False)]
+
+    index = {}  # (norm_street, norm_nbr) → postal_code
+    skipped = 0
+    for _, row in addr_gdf.iterrows():
+        nbr = str(row.get('housenumber') or '').strip()
+        if not nbr:
+            skipped += 1
+            continue
+
+        # Code postal directement dans la colonne
+        pc = str(row.get('haspostalinfo_objectidentifier') or '').strip()
+        if not (pc.isdigit() and len(pc) == 4):
+            skipped += 1
+            continue
+
+        # Récupérer les noms de rue
+        street_oid = str(row.get('hasstreetname_objectidentifier') or '').strip().rstrip('.0')
+        names = street_map.get(street_oid, ('', ''))
+
+        norm_nbr = normalize(nbr)
+        for raw_name in names:
+            if not raw_name:
+                continue
+            for variant in split_bilingual(raw_name):
+                key = (variant, norm_nbr)
+                if key not in index:
+                    index[key] = pc
+
+    print(f'[BeSt] {len(index)} entrées dans l\'index rue+numéro ({skipped} ignorées)')
+    return index
+
+
+def lookup_best_zipcode(street, housenumber, best_index):
+    norm_nbr = normalize(housenumber)
+    for part in ([normalize(street)] + split_bilingual(street)):
+        zc = best_index.get((part, norm_nbr))
+        if zc:
+            return zc
+    return None
+
+
+# ---------------------------------------------------------------------------
+# OSM pass 1 : polygones boundary=postal_code
 # ---------------------------------------------------------------------------
 
 class PostalCodeWayCollector(osmium.SimpleHandler):
-    """Collecte les coords de tous les ways pour reconstruire les polygones."""
     def __init__(self):
         super().__init__()
-        self.ways = {}  # way_id → list of (lon, lat)
-
+        self.ways = {}
     def way(self, w):
         coords = []
         for n in w.nodes:
@@ -138,59 +215,37 @@ class PostalCodeWayCollector(osmium.SimpleHandler):
 
 
 class PostalCodeRelationCollector(osmium.SimpleHandler):
-    """Collecte les relations boundary=postal_code et leurs members (way ids)."""
     def __init__(self):
         super().__init__()
-        # postal_code → list of way_ids
-        self.relations = {}
-        self.relation_ids = {}  # postal_code → osm relation id
-
+        self.relations = {}        # postal_code → [way_ids]
+        self.relation_ids = {}     # postal_code → osm_id
     def relation(self, r):
         tags = r.tags
-        if tags.get('type') != 'boundary':
-            return
-        if tags.get('boundary') != 'postal_code':
+        if tags.get('type') != 'boundary' or tags.get('boundary') != 'postal_code':
             return
         pc = (tags.get('postal_code') or tags.get('ref') or '').strip()
-        if not (pc.isdigit() and len(pc) == 4):
-            return
-        way_ids = [m.ref for m in r.members if m.type == 'w']
-        self.relations[pc] = way_ids
-        self.relation_ids[pc] = r.id
+        if pc.isdigit() and len(pc) == 4:
+            self.relations[pc] = [m.ref for m in r.members if m.type == 'w']
+            self.relation_ids[pc] = r.id
 
 
 def build_postal_polygons(pbf_path):
-    """
-    Reconstruit les polygones des relations boundary=postal_code
-    depuis le PBF. Retourne dict: postal_code → shapely geometry (prepared).
-    """
     print('[PC] Collecte des relations boundary=postal_code...')
-    rel_collector = PostalCodeRelationCollector()
-    rel_collector.apply_file(pbf_path)
-    print(f'[PC] {len(rel_collector.relations)} relations trouvées')
-
-    if not rel_collector.relations:
+    rc = PostalCodeRelationCollector()
+    rc.apply_file(pbf_path)
+    print(f'[PC] {len(rc.relations)} relations trouvées')
+    if not rc.relations:
         return {}, {}
 
-    # Collecter les ways nécessaires
-    needed_ways = set()
-    for way_ids in rel_collector.relations.values():
-        needed_ways.update(way_ids)
+    wc = PostalCodeWayCollector()
+    wc.apply_file(pbf_path, locations=True)
 
-    print(f'[PC] Collecte de {len(needed_ways)} ways...')
-    way_collector = PostalCodeWayCollector()
-    way_collector.apply_file(pbf_path, locations=True)
-
-    # Construire les polygones
     postal_polygons = {}
-    postal_relation_ids = rel_collector.relation_ids
-
-    for pc, way_ids in rel_collector.relations.items():
+    for pc, way_ids in rc.relations.items():
         rings = []
         for wid in way_ids:
-            coords = way_collector.ways.get(wid, [])
+            coords = wc.ways.get(wid, [])
             if len(coords) >= 3:
-                # Fermer l'anneau si nécessaire
                 if coords[0] != coords[-1]:
                     coords = coords + [coords[0]]
                 rings.append(coords)
@@ -198,19 +253,16 @@ def build_postal_polygons(pbf_path):
             continue
         try:
             polys = [Polygon(r) for r in rings if len(r) >= 4]
-            if not polys:
-                continue
-            geom = unary_union(polys)
-            postal_polygons[pc] = geom
+            if polys:
+                postal_polygons[pc] = unary_union(polys)
         except Exception as e:
-            print(f'[WARN] Impossible de construire le polygone pour {pc}: {e}')
+            print(f'[WARN] Polygone {pc} : {e}')
 
     print(f'[PC] {len(postal_polygons)} polygones construits')
-    return postal_polygons, postal_relation_ids
+    return postal_polygons, rc.relation_ids
 
 
 def find_postal_code(lon, lat, postal_polygons, prepared_cache):
-    """Retourne le code postal OSM pour un point donné (None si hors zone)."""
     pt = Point(lon, lat)
     for pc, geom in postal_polygons.items():
         if pc not in prepared_cache:
@@ -221,23 +273,20 @@ def find_postal_code(lon, lat, postal_polygons, prepared_cache):
 
 
 # ---------------------------------------------------------------------------
-# OSM pass 2 : collecter les adresses
+# OSM pass 2 : adresses
 # ---------------------------------------------------------------------------
 
 class AddressCollector(osmium.SimpleHandler):
     def __init__(self):
         super().__init__()
-        self.addresses = []   # list of dicts
-        self.with_postcode = []  # anomalies : addr:postcode présent
+        self.addresses       = []
+        self.with_postcode   = []
 
     def _process(self, osm_type, osm_id, tags, lat, lon):
         housenumber = tags.get('addr:housenumber')
-        street = tags.get('addr:street') or tags.get('addr:street_official')
-        if not housenumber or not street:
+        street      = tags.get('addr:street') or tags.get('addr:street_official')
+        if not housenumber or not street or lat is None or lon is None:
             return
-        if lat is None or lon is None:
-            return
-
         postcode_tag = tags.get('addr:postcode', '').strip()
         entry = {
             'osm_type':    osm_type,
@@ -246,16 +295,15 @@ class AddressCollector(osmium.SimpleHandler):
             'housenumber': housenumber,
             'lat':         lat,
             'lon':         lon,
-            'postcode_tag': postcode_tag if postcode_tag else None,
+            'postcode_tag': postcode_tag or None,
         }
         if postcode_tag:
             self.with_postcode.append(entry)
         self.addresses.append(entry)
 
     def node(self, n):
-        if not n.location.valid():
-            return
-        self._process('node', n.id, n.tags, n.location.lat, n.location.lon)
+        if n.location.valid():
+            self._process('node', n.id, n.tags, n.location.lat, n.location.lon)
 
     def way(self, w):
         if not w.tags.get('addr:housenumber'):
@@ -267,161 +315,102 @@ class AddressCollector(osmium.SimpleHandler):
                     lats.append(nd.location.lat)
                     lons.append(nd.location.lon)
             if lats:
-                lat = sum(lats) / len(lats)
-                lon = sum(lons) / len(lons)
-                self._process('way', w.id, w.tags, lat, lon)
+                self._process('way', w.id, w.tags,
+                              sum(lats)/len(lats), sum(lons)/len(lons))
         except Exception:
             pass
 
 
 def load_osm_addresses(pbf_path):
-    print(f'[OSM] Collecte des adresses OSM...')
-    handler = AddressCollector()
-    handler.apply_file(pbf_path, locations=True)
-    print(f'[OSM] {len(handler.addresses)} adresses collectées')
-    print(f'[OSM] {len(handler.with_postcode)} adresses avec addr:postcode (anomalie)')
-    return handler.addresses, handler.with_postcode
-
-
-# ---------------------------------------------------------------------------
-# UrbIS : index rue+numéro → ZIPCODE
-# ---------------------------------------------------------------------------
-
-def load_urbis_index(gpkg_path):
-    print(f'[URBIS] Lecture de {gpkg_path}...')
-    gdf = gpd.read_file(gpkg_path, layer='Addresses')
-    gdf = gdf[gdf['PARENTID'].isna()].copy()
-
-    index = {}  # (norm_street, norm_nbr) → zipcode (str)
-    for _, row in gdf.iterrows():
-        nbr = str(row['POLICENUM']).strip() if row['POLICENUM'] else ''
-        if not nbr:
-            continue
-        zc = str(row['ZIPCODE']).strip() if row['ZIPCODE'] else ''
-        if zc.endswith('.0'):
-            zc = zc[:-2]
-        if not (zc.isdigit() and len(zc) == 4):
-            continue
-        for col in ('STRNAMEFRE', 'STRNAMEDUT'):
-            val = row.get(col)
-            if not val:
-                continue
-            for part in split_bilingual(val):
-                key = (part, normalize(nbr))
-                if key not in index:
-                    index[key] = zc
-
-    print(f'[URBIS] {len(index)} entrées dans l\'index rue+numéro')
-    return index
-
-
-def lookup_urbis_zipcode(street, housenumber, urbis_index):
-    """Retourne le ZIPCODE UrbIS pour une adresse OSM, ou None."""
-    norm_street = normalize(street)
-    norm_nbr    = normalize(housenumber)
-    # Essai direct
-    zc = urbis_index.get((norm_street, norm_nbr))
-    if zc:
-        return zc
-    # Essai avec les variantes bilingues de la rue OSM
-    for part in split_bilingual(street):
-        zc = urbis_index.get((part, norm_nbr))
-        if zc:
-            return zc
-    return None
+    print(f'[OSM] Collecte des adresses...')
+    h = AddressCollector()
+    h.apply_file(pbf_path, locations=True)
+    print(f'[OSM] {len(h.addresses)} adresses, '
+          f'{len(h.with_postcode)} avec addr:postcode (anomalie)')
+    return h.addresses, h.with_postcode
 
 
 # ---------------------------------------------------------------------------
 # Rapport
 # ---------------------------------------------------------------------------
 
-def build_report(
-    anomalies_postcode_tag,
-    mismatches,
-    no_postal_zone,
-    not_in_urbis,
-    stats,
-    urbis_date,
-):
+def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
+                 not_in_best, stats, best_date):
     today = date.today().isoformat()
     L = []
-
     L.append('=' * 72)
     L.append('RAPPORT DE COMPARAISON DES CODES POSTAUX PAR ADRESSE')
-    L.append('Région de Bruxelles-Capitale — UrbIS vs OpenStreetMap')
+    L.append('Région de Bruxelles-Capitale — BeSt Address vs OpenStreetMap')
     L.append('=' * 72)
-    L.append(f'Date du rapport     : {today}')
-    L.append(f'Source UrbIS        : publication {urbis_date}')
-    L.append(f'Source OSM (PBF)    : {OSM_PBF_URL}')
+    L.append(f'Date du rapport      : {today}')
+    L.append(f'Source BeSt (GPKG)   : publication {best_date}')
+    L.append(f'Source OSM (PBF)     : {OSM_PBF_URL}')
     L.append('')
 
     L.append('RÉSUMÉ')
     L.append('-' * 40)
-    L.append(f'  Adresses OSM analysées             : {stats["total"]:>6}')
-    L.append(f'  Avec addr:postcode (anomalie)       : {stats["with_postcode_tag"]:>6}')
-    L.append(f'  Hors zone postal_code OSM           : {stats["no_postal_zone"]:>6}')
-    L.append(f'  Adresse absente d\'UrbIS             : {stats["not_in_urbis"]:>6}')
-    L.append(f'  CP OSM ≠ CP UrbIS (à vérifier)     : {stats["mismatches"]:>6}')
-    L.append(f'  CP OSM = CP UrbIS (OK)              : {stats["ok"]:>6}')
+    L.append(f'  Adresses OSM analysées              : {stats["total"]:>6}')
+    L.append(f'  Avec addr:postcode (anomalie)        : {stats["with_postcode_tag"]:>6}')
+    L.append(f'  Hors zone boundary=postal_code OSM   : {stats["no_postal_zone"]:>6}')
+    L.append(f'  Adresse absente du BeSt              : {stats["not_in_best"]:>6}')
+    L.append(f'  CP OSM ≠ CP BeSt (à vérifier)        : {stats["mismatches"]:>6}')
+    L.append(f'  CP OSM = CP BeSt (OK)                : {stats["ok"]:>6}')
     L.append('')
 
-    # -----------------------------------------------------------------------
+    # Anomalies addr:postcode
     L.append('ANOMALIE : ADRESSES AVEC addr:postcode DIRECT')
-    L.append('(le tag addr:postcode ne devrait pas être utilisé à Bruxelles,')
+    L.append('(le tag addr:postcode ne devrait pas être utilisé à Bruxelles ;')
     L.append(' le code postal est porté par la relation boundary=postal_code)')
     L.append('-' * 40)
     if anomalies_postcode_tag:
-        L.append(f'  {"OSM ref":<20} {"Rue":<35} {"Numéro":<10} {"addr:postcode"}')
-        L.append(f'  {"-"*18:<20} {"-"*33:<35} {"-"*8:<10} {"-"*12}')
+        L.append(f'  {"OSM ref":<22} {"Rue":<33} {"N°":<8} {"addr:postcode"}')
+        L.append(f'  {"-"*20:<22} {"-"*31:<33} {"-"*6:<8} {"-"*12}')
         for a in sorted(anomalies_postcode_tag, key=lambda x: x['street']):
             ref = f'{a["osm_type"]}/{a["osm_id"]}'
-            L.append(f'  {ref:<20} {a["street"][:33]:<35} {a["housenumber"]:<10} {a["postcode_tag"]}')
+            L.append(f'  {ref:<22} {a["street"][:31]:<33} {a["housenumber"]:<8} {a["postcode_tag"]}')
     else:
         L.append('  (aucune)')
     L.append('')
 
-    # -----------------------------------------------------------------------
-    L.append('CP À VÉRIFIER : CP CALCULÉ OSM ≠ CP URBIS')
+    # Mismatches
+    L.append('CP À VÉRIFIER : CP CALCULÉ OSM ≠ CP BeSt')
     L.append('-' * 40)
     if mismatches:
-        L.append(f'  {"OSM ref":<20} {"Rue":<35} {"Numéro":<10} {"CP OSM":<8} {"CP UrbIS"}')
-        L.append(f'  {"-"*18:<20} {"-"*33:<35} {"-"*8:<10} {"-"*6:<8} {"-"*8}')
+        L.append(f'  {"OSM ref":<22} {"Rue":<33} {"N°":<8} {"CP OSM":<8} {"CP BeSt"}')
+        L.append(f'  {"-"*20:<22} {"-"*31:<33} {"-"*6:<8} {"-"*6:<8} {"-"*7}')
         for m in sorted(mismatches, key=lambda x: (x['cp_osm'], x['street'])):
             ref = f'{m["osm_type"]}/{m["osm_id"]}'
-            L.append(
-                f'  {ref:<20} {m["street"][:33]:<35} {m["housenumber"]:<10} '
-                f'{m["cp_osm"]:<8} {m["cp_urbis"]}'
-            )
+            L.append(f'  {ref:<22} {m["street"][:31]:<33} {m["housenumber"]:<8} '
+                     f'{m["cp_osm"]:<8} {m["cp_best"]}')
     else:
-        L.append('  (aucun mismatch — tout est cohérent !)')
+        L.append('  (aucun mismatch)')
     L.append('')
 
-    # -----------------------------------------------------------------------
+    # Hors zone postal_code OSM
     L.append('ADRESSES OSM HORS ZONE boundary=postal_code')
-    L.append('(adresses dans le PBF mais pas dans une relation postal_code OSM)')
     L.append('-' * 40)
     if no_postal_zone:
-        L.append(f'  {"OSM ref":<20} {"Rue":<35} {"Numéro":<10} {"CP UrbIS"}')
-        L.append(f'  {"-"*18:<20} {"-"*33:<35} {"-"*8:<10} {"-"*8}')
+        L.append(f'  {"OSM ref":<22} {"Rue":<33} {"N°":<8} {"CP BeSt"}')
+        L.append(f'  {"-"*20:<22} {"-"*31:<33} {"-"*6:<8} {"-"*7}')
         for a in sorted(no_postal_zone, key=lambda x: x['street']):
             ref = f'{a["osm_type"]}/{a["osm_id"]}'
-            cp_u = a.get('cp_urbis', '?')
-            L.append(f'  {ref:<20} {a["street"][:33]:<35} {a["housenumber"]:<10} {cp_u}')
+            L.append(f'  {ref:<22} {a["street"][:31]:<33} {a["housenumber"]:<8} '
+                     f'{a.get("cp_best","?")}')
     else:
         L.append('  (aucune)')
     L.append('')
 
-    # -----------------------------------------------------------------------
-    L.append('ADRESSES OSM SANS CORRESPONDANCE DANS URBIS')
-    L.append('(rue+numéro introuvable dans le GPKG UrbIS)')
+    # Absentes du BeSt
+    L.append('ADRESSES OSM SANS CORRESPONDANCE DANS LE BeSt')
+    L.append('(rue+numéro introuvable dans le GPKG BeSt)')
     L.append('-' * 40)
-    if not_in_urbis:
-        L.append(f'  {"OSM ref":<20} {"Rue":<35} {"Numéro":<10} {"CP OSM calculé"}')
-        L.append(f'  {"-"*18:<20} {"-"*33:<35} {"-"*8:<10} {"-"*14}')
-        for a in sorted(not_in_urbis, key=lambda x: x['street']):
+    if not_in_best:
+        L.append(f'  {"OSM ref":<22} {"Rue":<33} {"N°":<8} {"CP OSM calculé"}')
+        L.append(f'  {"-"*20:<22} {"-"*31:<33} {"-"*6:<8} {"-"*14}')
+        for a in sorted(not_in_best, key=lambda x: x['street']):
             ref = f'{a["osm_type"]}/{a["osm_id"]}'
-            cp_o = a.get('cp_osm', '?')
-            L.append(f'  {ref:<20} {a["street"][:33]:<35} {a["housenumber"]:<10} {cp_o}')
+            L.append(f'  {ref:<22} {a["street"][:31]:<33} {a["housenumber"]:<8} '
+                     f'{a.get("cp_osm","?")}')
     else:
         L.append('  (aucune)')
     L.append('')
@@ -437,19 +426,22 @@ def build_report(
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    # 1. GPKG UrbIS
-    existing_gpkg = glob.glob('*.gpkg') + glob.glob('**/*.gpkg')
-    urbis_date = 'inconnue'
+    # 1. GPKG BeSt
+    existing_gpkg = glob.glob('BeStBrussels_31370_GPKG_04000*.gpkg') + \
+                    glob.glob('**/*.gpkg')
+    best_date = 'inconnue'
 
     if existing_gpkg:
         gpkg_path = existing_gpkg[0]
         print(f'[INFO] GPKG déjà présent : {gpkg_path}')
-        if os.path.isfile('version.json'):
-            with open('version.json') as f:
-                urbis_date = json.load(f).get('urbis_date', 'inconnue')
+        # Extraire la date depuis le nom de fichier si possible
+        m = re.search(r'(\d{8})', gpkg_path)
+        if m:
+            d = m.group(1)
+            best_date = f'{d[:4]}-{d[4:6]}-{d[6:]}'
     else:
-        latest_dt, latest_url = find_latest_gpkg(FEED_URL)
-        urbis_date = str(latest_dt.date())
+        latest_dt, latest_url = find_latest_best_gpkg(FEED_URL)
+        best_date = str(latest_dt.date())
         zip_name = os.path.basename(latest_url)
         if not os.path.isfile(zip_name):
             download(latest_url, zip_name)
@@ -461,47 +453,42 @@ if __name__ == '__main__':
     else:
         print(f'[INFO] PBF déjà présent : {OSM_PBF_FILE}')
 
-    # 3. Construire les polygones postal_code depuis OSM
-    postal_polygons, postal_relation_ids = build_postal_polygons(OSM_PBF_FILE)
+    # 3. Polygones postal_code OSM
+    postal_polygons, _ = build_postal_polygons(OSM_PBF_FILE)
 
-    # 4. Charger les adresses OSM
+    # 4. Adresses OSM
     osm_addresses, anomalies_postcode_tag = load_osm_addresses(OSM_PBF_FILE)
 
-    # 5. Charger l'index UrbIS
-    urbis_index = load_urbis_index(gpkg_path)
+    # 5. Index BeSt
+    best_index = load_best_index(gpkg_path)
 
-    # 6. Analyse adresse par adresse
+    # 6. Analyse
     print('[ANALYSE] Calcul spatial et comparaison CP...')
     prepared_cache = {}
-    mismatches   = []
+    mismatches     = []
     no_postal_zone = []
-    not_in_urbis = []
-    ok_count     = 0
+    not_in_best    = []
+    ok_count       = 0
 
     for i, addr in enumerate(osm_addresses):
         if i % 10000 == 0:
             print(f'\r    {i}/{len(osm_addresses)}', end='', flush=True)
 
-        lon, lat = addr['lon'], addr['lat']
+        cp_osm  = find_postal_code(addr['lon'], addr['lat'],
+                                   postal_polygons, prepared_cache)
+        cp_best = lookup_best_zipcode(addr['street'], addr['housenumber'],
+                                      best_index)
 
-        # Code postal calculé spatialement (on ignore addr:postcode)
-        cp_osm = find_postal_code(lon, lat, postal_polygons, prepared_cache)
-
-        # Code postal UrbIS
-        cp_urbis = lookup_urbis_zipcode(addr['street'], addr['housenumber'], urbis_index)
-
-        addr['cp_osm']   = cp_osm
-        addr['cp_urbis'] = cp_urbis
+        addr['cp_osm']  = cp_osm
+        addr['cp_best'] = cp_best
 
         if cp_osm is None:
             no_postal_zone.append(addr)
             continue
-
-        if cp_urbis is None:
-            not_in_urbis.append(addr)
+        if cp_best is None:
+            not_in_best.append(addr)
             continue
-
-        if cp_osm != cp_urbis:
+        if cp_osm != cp_best:
             mismatches.append(addr)
         else:
             ok_count += 1
@@ -513,7 +500,7 @@ if __name__ == '__main__':
         'total':            len(osm_addresses),
         'with_postcode_tag': len(anomalies_postcode_tag),
         'no_postal_zone':   len(no_postal_zone),
-        'not_in_urbis':     len(not_in_urbis),
+        'not_in_best':      len(not_in_best),
         'mismatches':       len(mismatches),
         'ok':               ok_count,
     }
@@ -523,9 +510,9 @@ if __name__ == '__main__':
         anomalies_postcode_tag=anomalies_postcode_tag,
         mismatches=mismatches,
         no_postal_zone=no_postal_zone,
-        not_in_urbis=not_in_urbis,
+        not_in_best=not_in_best,
         stats=stats,
-        urbis_date=urbis_date,
+        best_date=best_date,
     )
 
     output_file = f'postal_code_report_{date.today().isoformat()}.txt'
