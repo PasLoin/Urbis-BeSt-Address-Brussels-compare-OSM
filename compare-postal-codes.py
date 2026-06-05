@@ -54,6 +54,27 @@ HEADERS       = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
 
 GEOJSON_DIR   = 'postal_codes_geojson'
 
+# Polygone officiel de la Région de Bruxelles-Capitale.
+# Le PBF est généré avec un buffer (~100m) autour de cette région, donc :
+#   - certaines adresses du PBF sont hors région → à filtrer
+#   - certaines relations boundary=postal_code touchent juste le bord
+#     (ex: 1800 Vilvoorde, relation 3366255) : seules quelques ways sont
+#     présentes, le polygone est reconstruit avec une "ligne droite imaginaire"
+#     et déborde sur des CP voisins (1120) → à rejeter
+BOUNDARY_RELATION_ID = 54094
+BOUNDARY_POLY_URL    = f'https://polygons.openstreetmap.fr/get_poly.py?id={BOUNDARY_RELATION_ID}'
+REGION_POLY_CACHE    = f'region_{BOUNDARY_RELATION_ID}.poly'
+
+# Whitelist : codes postaux légitimes de la RBC.
+# Tout autre code postal apparaissant dans le PBF est issu d'une relation
+# partiellement présente et sera rejeté.
+BRUSSELS_POSTAL_CODES = frozenset([
+    '1000', '1020', '1030', '1040', '1050', '1060', '1070',
+    '1080', '1081', '1082', '1083', '1090',
+    '1120', '1130', '1140', '1150', '1160', '1170',
+    '1180', '1190', '1200', '1210',
+])
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -380,6 +401,184 @@ def _safe_polygon(coords):
     return p
 
 
+# ---------------------------------------------------------------------------
+# Polygone de la Région de Bruxelles-Capitale (filtre buffer + clip CP)
+# ---------------------------------------------------------------------------
+
+def _parse_poly_file(text):
+    """
+    Parse le format Osmosis .poly servi par polygons.openstreetmap.fr.
+    Retourne une liste de (is_hole: bool, ring: [(lon, lat), ...]).
+    Format : https://wiki.openstreetmap.org/wiki/Osmosis/Polygon_Filter_File_Format
+    """
+    rings = []
+    state = 'header'   # header → between_sections → in_section → ...
+    is_hole = False
+    current = []
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if state == 'header':
+            # 1re ligne non vide = identifiant du fichier, on l'ignore
+            state = 'between_sections'
+            continue
+        if state == 'between_sections':
+            if line == 'END':
+                break  # fin du fichier
+            is_hole = line.startswith('!')
+            current = []
+            state = 'in_section'
+            continue
+        if state == 'in_section':
+            if line == 'END':
+                if len(current) >= 3:
+                    rings.append((is_hole, current))
+                state = 'between_sections'
+                continue
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    current.append((float(parts[0]), float(parts[1])))
+                except ValueError:
+                    pass
+    return rings
+
+
+def _build_region_polygon(rings):
+    """Construit un (Multi)Polygon Shapely depuis les rings .poly."""
+    if not rings:
+        return None
+
+    outers, holes = [], []
+    for is_hole, ring in rings:
+        if len(ring) < 3:
+            continue
+        if ring[0] != ring[-1]:
+            ring = list(ring) + [ring[0]]
+        (holes if is_hole else outers).append(ring)
+
+    polys = []
+    for outer in outers:
+        outer_poly = _safe_polygon(outer)
+        if outer_poly is None or outer_poly.geom_type != 'Polygon':
+            continue
+        applicable_holes = []
+        for hole in holes:
+            hp = _safe_polygon(hole)
+            if hp is not None and outer_poly.contains(hp):
+                applicable_holes.append(hole)
+        if applicable_holes:
+            try:
+                p = Polygon(outer, applicable_holes)
+                if not p.is_valid:
+                    p = p.buffer(0)
+                polys.append(p if not p.is_empty else outer_poly)
+            except Exception:
+                polys.append(outer_poly)
+        else:
+            polys.append(outer_poly)
+
+    if not polys:
+        return None
+    return polys[0] if len(polys) == 1 else unary_union(polys)
+
+
+def fetch_region_polygon():
+    """
+    Récupère le polygone de la RBC depuis polygons.openstreetmap.fr.
+    Avec cache local et retry simple.
+    """
+    if os.path.isfile(REGION_POLY_CACHE):
+        print(f'[REGION] Cache trouvé : {REGION_POLY_CACHE}', flush=True)
+        with open(REGION_POLY_CACHE, 'r', encoding='utf-8') as f:
+            text = f.read()
+    else:
+        print(f'[REGION] Téléchargement : {BOUNDARY_POLY_URL}', flush=True)
+        last_err = None
+        text = None
+        for attempt in range(3):
+            t0 = time.monotonic()
+            try:
+                req = urllib.request.Request(BOUNDARY_POLY_URL, headers=HEADERS)
+                with urllib.request.urlopen(req, timeout=60) as r:
+                    text = r.read().decode('utf-8', errors='replace')
+                dt = time.monotonic() - t0
+                print(f'[REGION] Tentative {attempt+1} → HTTP {r.status} '
+                      f'({len(text)} bytes en {dt:.1f}s)', flush=True)
+                # Sanity-check : un vrai .poly contient au moins un "END"
+                if 'END' in text and len(text) > 100:
+                    break
+                print(f'[REGION] Réponse suspecte (pas un .poly valide), retry...',
+                      flush=True)
+                text = None
+            except Exception as e:
+                last_err = e
+                print(f'[REGION] Tentative {attempt+1} échouée : '
+                      f'{type(e).__name__}: {e}', flush=True)
+                time.sleep(2)
+        if text is None:
+            print(f'[ERREUR] Impossible de récupérer le polygone Région ({last_err})',
+                  flush=True)
+            sys.exit(1)
+        with open(REGION_POLY_CACHE, 'w', encoding='utf-8') as f:
+            f.write(text)
+        print(f'[REGION] Sauvegardé dans le cache : {REGION_POLY_CACHE}', flush=True)
+
+    rings = _parse_poly_file(text)
+    print(f'[REGION] {len(rings)} ring(s) parsé(s) '
+          f'({sum(1 for h,_ in rings if not h)} outer, '
+          f'{sum(1 for h,_ in rings if h)} hole)', flush=True)
+    poly = _build_region_polygon(rings)
+    if poly is None or poly.is_empty:
+        print('[ERREUR] Polygone Région invalide ou vide.', flush=True)
+        sys.exit(1)
+    print(f'[REGION] Polygone construit : type={poly.geom_type}, '
+          f'area={poly.area:.6f} deg² (~{poly.area * 12321:.1f} km² approx)',
+          flush=True)
+    return poly
+
+
+def filter_postal_polygons_to_region(postal_polygons, region_poly):
+    """
+    1. Rejette tout polygone dont le code postal n'est pas dans la whitelist
+       BRUSSELS_POSTAL_CODES (gomme les 1800, 1830, etc. mal reconstruits).
+    2. Clip les polygones gardés à la Région (gomme les débordements de bord).
+    """
+    filtered = {}
+    rejected_whitelist = []
+    rejected_clip      = []
+
+    for pc, geom in postal_polygons.items():
+        if pc not in BRUSSELS_POSTAL_CODES:
+            rejected_whitelist.append(pc)
+            continue
+        try:
+            clipped = geom.intersection(region_poly)
+            if not clipped.is_valid:
+                clipped = clipped.buffer(0)
+        except Exception as e:
+            print(f'[REGION] CP {pc}: intersection échouée ({e}), gardé brut',
+                  flush=True)
+            filtered[pc] = geom
+            continue
+        if clipped.is_empty:
+            rejected_clip.append(pc)
+            continue
+        filtered[pc] = clipped
+
+    if rejected_whitelist:
+        print(f'[REGION] {len(rejected_whitelist)} CP hors whitelist rejetés : '
+              f'{sorted(rejected_whitelist)}', flush=True)
+    if rejected_clip:
+        print(f'[REGION] {len(rejected_clip)} CP rejetés (clip vide) : '
+              f'{sorted(rejected_clip)}', flush=True)
+    print(f'[REGION] {len(filtered)} polygones CP gardés sur '
+          f'{len(postal_polygons)}', flush=True)
+    return filtered
+
+
 def build_postal_polygons(pbf_path):
     """
     Construit les polygones boundary=postal_code à partir du PBF.
@@ -466,7 +665,8 @@ def build_postal_polygons(pbf_path):
     return postal_polygons, handler.relation_ids
 
 
-def export_postal_polygons_geojson(postal_polygons, relation_ids, output_dir=GEOJSON_DIR):
+def export_postal_polygons_geojson(postal_polygons, relation_ids,
+                                   region_poly=None, output_dir=GEOJSON_DIR):
     """
     Debug : exporte chaque polygone postal_code OSM en GeoJSON séparé,
     plus un fichier combiné `_all_postal_codes.geojson`.
@@ -511,6 +711,21 @@ def export_postal_polygons_geojson(postal_polygons, relation_ids, output_dir=GEO
             gdf.to_file(combined_path, driver='GeoJSON')
         except Exception as e:
             print(f'[WARN] Export GeoJSON combiné échoué : {e}')
+
+    # Polygone de la Région (pour overlay visuel sur les CP)
+    if region_poly is not None:
+        try:
+            gdf = gpd.GeoDataFrame(
+                [{'name': 'Région de Bruxelles-Capitale',
+                  'osm_relation_id': BOUNDARY_RELATION_ID,
+                  'source': BOUNDARY_POLY_URL}],
+                geometry=[region_poly],
+                crs='EPSG:4326',
+            )
+            gdf.to_file(os.path.join(output_dir, '_region_brussels.geojson'),
+                        driver='GeoJSON')
+        except Exception as e:
+            print(f'[WARN] Export GeoJSON région échoué : {e}', flush=True)
 
     print(f'[GEOJSON] {len(records)} polygones exportés dans {output_dir}/')
 
@@ -599,7 +814,7 @@ def load_osm_addresses(pbf_path):
 # ---------------------------------------------------------------------------
 
 def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
-                 not_in_best, stats, best_date):
+                 not_in_best, outside_region, stats, best_date):
     today = date.today().isoformat()
     L = []
     L.append('=' * 72)
@@ -609,16 +824,19 @@ def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
     L.append(f'Date du rapport      : {today}')
     L.append(f'Source BeSt (GPKG)   : publication {best_date}')
     L.append(f'Source OSM (PBF)     : {OSM_PBF_URL}')
+    L.append(f'Polygone Région      : {BOUNDARY_POLY_URL}')
     L.append('')
 
     L.append('RÉSUMÉ')
     L.append('-' * 40)
-    L.append(f'  Adresses OSM analysées              : {stats["total"]:>6}')
-    L.append(f'  Avec addr:postcode (anomalie)        : {stats["with_postcode_tag"]:>6}')
-    L.append(f'  Hors zone boundary=postal_code OSM   : {stats["no_postal_zone"]:>6}')
-    L.append(f'  Adresse absente du BeSt              : {stats["not_in_best"]:>6}')
-    L.append(f'  CP OSM ≠ CP BeSt (à vérifier)        : {stats["mismatches"]:>6}')
-    L.append(f'  CP OSM = CP BeSt (OK)                : {stats["ok"]:>6}')
+    L.append(f'  Adresses OSM trouvées dans le PBF    : {stats["total_pbf"]:>6}')
+    L.append(f'    └─ dans le buffer (hors région)    : {stats["outside_region"]:>6}')
+    L.append(f'  Adresses OSM analysées (intra-RBC)   : {stats["total"]:>6}')
+    L.append(f'    Avec addr:postcode (anomalie)      : {stats["with_postcode_tag"]:>6}')
+    L.append(f'    Hors zone boundary=postal_code OSM : {stats["no_postal_zone"]:>6}')
+    L.append(f'    Adresse absente du BeSt            : {stats["not_in_best"]:>6}')
+    L.append(f'    CP OSM ≠ CP BeSt (à vérifier)      : {stats["mismatches"]:>6}')
+    L.append(f'    CP OSM = CP BeSt (OK)              : {stats["ok"]:>6}')
     L.append('')
 
     L.append('ANOMALIE : ADRESSES AVEC addr:postcode DIRECT')
@@ -719,21 +937,44 @@ if __name__ == '__main__':
     else:
         print(f'[INFO] PBF déjà présent : {OSM_PBF_FILE}')
 
-    # 3. Polygones postal_code OSM
-    postal_polygons, relation_ids = build_postal_polygons(OSM_PBF_FILE)
+    # 3. Polygones postal_code OSM (bruts, avant filtrage région)
+    postal_polygons_raw, relation_ids = build_postal_polygons(OSM_PBF_FILE)
 
-    # 3bis. Export GeoJSON debug (un par CP + un combiné)
-    export_postal_polygons_geojson(postal_polygons, relation_ids)
+    # 4. Polygone officiel de la Région de Bruxelles-Capitale
+    region_poly = fetch_region_polygon()
+    region_prep = prep(region_poly)
 
-    # 4. Adresses OSM
-    osm_addresses, anomalies_postcode_tag = load_osm_addresses(OSM_PBF_FILE)
+    # 5. Filtrer les polygones CP : whitelist + clip à la Région
+    postal_polygons = filter_postal_polygons_to_region(postal_polygons_raw, region_poly)
 
-    # 5. Index spatial BeSt
+    # 5bis. Export GeoJSON debug (un par CP + combiné + polygone Région)
+    export_postal_polygons_geojson(postal_polygons, relation_ids,
+                                   region_poly=region_poly)
+
+    # 6. Adresses OSM (toutes, y compris celles du buffer)
+    osm_addresses_all, anomalies_all = load_osm_addresses(OSM_PBF_FILE)
+
+    # 6bis. Ne garder que les adresses strictement dans la Région
+    print('[REGION] Filtrage des adresses (élimination du buffer du PBF)...',
+          flush=True)
+    osm_addresses  = []
+    outside_region = []
+    for addr in osm_addresses_all:
+        if region_prep.covers(Point(addr['lon'], addr['lat'])):
+            osm_addresses.append(addr)
+        else:
+            outside_region.append(addr)
+    anomalies_postcode_tag = [a for a in anomalies_all
+                              if region_prep.covers(Point(a['lon'], a['lat']))]
+    print(f'[REGION] {len(osm_addresses)}/{len(osm_addresses_all)} adresses '
+          f'gardées ({len(outside_region)} dans le buffer)', flush=True)
+
+    # 7. Index spatial BeSt
     best_tree, best_lons, best_lats, best_norm_nbrs, best_postcodes = \
         load_best_spatial_index(gpkg_path)
 
-    # 6. Analyse
-    print('[ANALYSE] Calcul spatial et comparaison CP...')
+    # 8. Analyse
+    print('[ANALYSE] Calcul spatial et comparaison CP...', flush=True)
     prepared_cache = {}
     mismatches     = []
     no_postal_zone = []
@@ -742,7 +983,7 @@ if __name__ == '__main__':
 
     for i, addr in enumerate(osm_addresses):
         if i % 10000 == 0:
-            print(f'\r    {i}/{len(osm_addresses)}', end='', flush=True)
+            print(f'[ANALYSE]   {i}/{len(osm_addresses)}', flush=True)
         cp_osm  = find_postal_code(addr['lon'], addr['lat'],
                                    postal_polygons, prepared_cache)
         norm_nbr = normalize(addr['housenumber'])
@@ -764,10 +1005,12 @@ if __name__ == '__main__':
         else:
             ok_count += 1
 
-    print(f'\r    {len(osm_addresses)}/{len(osm_addresses)}')
-    print('[ANALYSE] Terminé.')
+    print(f'[ANALYSE]   {len(osm_addresses)}/{len(osm_addresses)}', flush=True)
+    print('[ANALYSE] Terminé.', flush=True)
 
     stats = {
+        'total_pbf':         len(osm_addresses_all),
+        'outside_region':    len(outside_region),
         'total':             len(osm_addresses),
         'with_postcode_tag': len(anomalies_postcode_tag),
         'no_postal_zone':    len(no_postal_zone),
@@ -781,6 +1024,7 @@ if __name__ == '__main__':
         mismatches=mismatches,
         no_postal_zone=no_postal_zone,
         not_in_best=not_in_best,
+        outside_region=outside_region,
         stats=stats,
         best_date=best_date,
     )
