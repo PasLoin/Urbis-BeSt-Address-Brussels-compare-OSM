@@ -65,15 +65,10 @@ BOUNDARY_RELATION_ID = 54094
 BOUNDARY_POLY_URL    = f'https://polygons.openstreetmap.fr/get_poly.py?id={BOUNDARY_RELATION_ID}'
 REGION_POLY_CACHE    = f'region_{BOUNDARY_RELATION_ID}.poly'
 
-# Whitelist : codes postaux légitimes de la RBC.
-# Tout autre code postal apparaissant dans le PBF est issu d'une relation
-# partiellement présente et sera rejeté.
-BRUSSELS_POSTAL_CODES = frozenset([
-    '1000', '1020', '1030', '1040', '1050', '1060', '1070',
-    '1080', '1081', '1082', '1083', '1090',
-    '1120', '1130', '1140', '1150', '1160', '1170',
-    '1180', '1190', '1200', '1210',
-])
+# La whitelist des CP légitimes est construite dynamiquement depuis BeSt
+# (cf. load_best_spatial_index) — elle inclut automatiquement les codes
+# postaux spéciaux (parlement, institutions...) qui ne sont pas dans la
+# liste classique des 19 communes.
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +278,11 @@ def load_best_spatial_index(gpkg_path):
     coords = np.column_stack([lons, lats])
     tree = cKDTree(coords)
     print(f'[BeSt] {len(lons)} adresses indexées ({skipped} ignorées)')
-    return tree, lons, lats, norm_nbrs, postcodes
+
+    brussels_postal_codes = frozenset(postcodes)
+    print(f'[BeSt] {len(brussels_postal_codes)} codes postaux distincts dans BeSt : '
+          f'{sorted(brussels_postal_codes)}', flush=True)
+    return tree, lons, lats, norm_nbrs, postcodes, brussels_postal_codes
 
 
 # Rayon de recherche en degrés (~50m à Bruxelles : 0.00045°)
@@ -540,10 +539,11 @@ def fetch_region_polygon():
     return poly
 
 
-def filter_postal_polygons_to_region(postal_polygons, region_poly):
+def filter_postal_polygons_to_region(postal_polygons, region_poly, whitelist):
     """
-    1. Rejette tout polygone dont le code postal n'est pas dans la whitelist
-       BRUSSELS_POSTAL_CODES (gomme les 1800, 1830, etc. mal reconstruits).
+    1. Rejette tout polygone dont le code postal n'est pas dans `whitelist`
+       (typiquement l'ensemble des CP distincts du GPKG BeSt) → gomme
+       les 1800, 1830, 1850 etc. mal reconstruits depuis le PBF tampon.
     2. Clip les polygones gardés à la Région (gomme les débordements de bord).
     """
     filtered = {}
@@ -551,7 +551,7 @@ def filter_postal_polygons_to_region(postal_polygons, region_poly):
     rejected_clip      = []
 
     for pc, geom in postal_polygons.items():
-        if pc not in BRUSSELS_POSTAL_CODES:
+        if pc not in whitelist:
             rejected_whitelist.append(pc)
             continue
         try:
@@ -569,7 +569,7 @@ def filter_postal_polygons_to_region(postal_polygons, region_poly):
         filtered[pc] = clipped
 
     if rejected_whitelist:
-        print(f'[REGION] {len(rejected_whitelist)} CP hors whitelist rejetés : '
+        print(f'[REGION] {len(rejected_whitelist)} CP hors whitelist BeSt rejetés : '
               f'{sorted(rejected_whitelist)}', flush=True)
     if rejected_clip:
         print(f'[REGION] {len(rejected_clip)} CP rejetés (clip vide) : '
@@ -760,25 +760,40 @@ class AddressCollector(osmium.SimpleHandler):
         super().__init__()
         self.addresses     = []
         self.with_postcode = []
+        self.multi_count   = 0  # nb d'adresses issues d'éclatement "24;30"
 
     def _process(self, osm_type, osm_id, tags, lat, lon):
-        housenumber = tags.get('addr:housenumber')
+        housenumber_raw = tags.get('addr:housenumber')
         street      = tags.get('addr:street') or tags.get('addr:street_official')
-        if not housenumber or not street or lat is None or lon is None:
+        if not housenumber_raw or not street or lat is None or lon is None:
             return
         postcode_tag = tags.get('addr:postcode', '').strip()
-        entry = {
-            'osm_type':    osm_type,
-            'osm_id':      osm_id,
-            'street':      street,
-            'housenumber': housenumber,
-            'lat':         lat,
-            'lon':         lon,
-            'postcode_tag': postcode_tag or None,
-        }
-        if postcode_tag:
-            self.with_postcode.append(entry)
-        self.addresses.append(entry)
+
+        # Convention OSM : addr:housenumber="24;30" représente UNE porte qui
+        # regroupe DEUX adresses postales (24 et 30). Idem "1068;1070;1072".
+        # On émet une entrée par numéro distinct, en conservant la trace
+        # de l'osm_id partagé pour pouvoir retrouver l'objet en cas d'anomalie.
+        housenumbers = [h.strip() for h in str(housenumber_raw).split(';') if h.strip()]
+        if not housenumbers:
+            return
+        is_multi = len(housenumbers) > 1
+
+        for hn in housenumbers:
+            entry = {
+                'osm_type':    osm_type,
+                'osm_id':      osm_id,
+                'street':      street,
+                'housenumber': hn,
+                'housenumber_raw': housenumber_raw if is_multi else None,
+                'lat':         lat,
+                'lon':         lon,
+                'postcode_tag': postcode_tag or None,
+            }
+            if postcode_tag:
+                self.with_postcode.append(entry)
+            self.addresses.append(entry)
+            if is_multi:
+                self.multi_count += 1
 
     def node(self, n):
         if n.location.valid():
@@ -801,11 +816,13 @@ class AddressCollector(osmium.SimpleHandler):
 
 
 def load_osm_addresses(pbf_path):
-    print('[OSM] Collecte des adresses...')
+    print('[OSM] Collecte des adresses...', flush=True)
     h = AddressCollector()
     h.apply_file(pbf_path, locations=True)
     print(f'[OSM] {len(h.addresses)} adresses, '
-          f'{len(h.with_postcode)} avec addr:postcode (anomalie)')
+          f'{len(h.with_postcode)} avec addr:postcode (anomalie), '
+          f'{h.multi_count} issues d\'un addr:housenumber multi (ex: "24;30")',
+          flush=True)
     return h.addresses, h.with_postcode
 
 
@@ -829,7 +846,12 @@ def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
 
     L.append('RÉSUMÉ')
     L.append('-' * 40)
+    L.append(f'  Codes postaux dans BeSt (whitelist)  : {stats["best_postal_codes"]:>6}')
+    L.append(f'  Polygones CP OSM gardés              : {stats["osm_postal_codes"]:>6}')
+    L.append('')
     L.append(f'  Adresses OSM trouvées dans le PBF    : {stats["total_pbf"]:>6}')
+    L.append(f'    └─ issues d\'un addr:housenumber    : {stats["multi_housenumber"]:>6}')
+    L.append(f'       multi ("24;30" → 24 + 30)')
     L.append(f'    └─ dans le buffer (hors région)    : {stats["outside_region"]:>6}')
     L.append(f'  Adresses OSM analysées (intra-RBC)   : {stats["total"]:>6}')
     L.append(f'    Avec addr:postcode (anomalie)      : {stats["with_postcode_tag"]:>6}')
@@ -937,24 +959,29 @@ if __name__ == '__main__':
     else:
         print(f'[INFO] PBF déjà présent : {OSM_PBF_FILE}')
 
-    # 3. Polygones postal_code OSM (bruts, avant filtrage région)
+    # 3. Index spatial BeSt + whitelist dynamique des CP légitimes
+    best_tree, best_lons, best_lats, best_norm_nbrs, best_postcodes, \
+        brussels_postal_codes = load_best_spatial_index(gpkg_path)
+
+    # 4. Polygones postal_code OSM (bruts, avant filtrage région)
     postal_polygons_raw, relation_ids = build_postal_polygons(OSM_PBF_FILE)
 
-    # 4. Polygone officiel de la Région de Bruxelles-Capitale
+    # 5. Polygone officiel de la Région de Bruxelles-Capitale
     region_poly = fetch_region_polygon()
     region_prep = prep(region_poly)
 
-    # 5. Filtrer les polygones CP : whitelist + clip à la Région
-    postal_polygons = filter_postal_polygons_to_region(postal_polygons_raw, region_poly)
+    # 6. Filtrer les polygones CP : whitelist (BeSt) + clip à la Région
+    postal_polygons = filter_postal_polygons_to_region(
+        postal_polygons_raw, region_poly, brussels_postal_codes)
 
-    # 5bis. Export GeoJSON debug (un par CP + combiné + polygone Région)
+    # 6bis. Export GeoJSON debug (un par CP + combiné + polygone Région)
     export_postal_polygons_geojson(postal_polygons, relation_ids,
                                    region_poly=region_poly)
 
-    # 6. Adresses OSM (toutes, y compris celles du buffer)
+    # 7. Adresses OSM (toutes, y compris celles du buffer)
     osm_addresses_all, anomalies_all = load_osm_addresses(OSM_PBF_FILE)
 
-    # 6bis. Ne garder que les adresses strictement dans la Région
+    # 7bis. Ne garder que les adresses strictement dans la Région
     print('[REGION] Filtrage des adresses (élimination du buffer du PBF)...',
           flush=True)
     osm_addresses  = []
@@ -968,10 +995,6 @@ if __name__ == '__main__':
                               if region_prep.covers(Point(a['lon'], a['lat']))]
     print(f'[REGION] {len(osm_addresses)}/{len(osm_addresses_all)} adresses '
           f'gardées ({len(outside_region)} dans le buffer)', flush=True)
-
-    # 7. Index spatial BeSt
-    best_tree, best_lons, best_lats, best_norm_nbrs, best_postcodes = \
-        load_best_spatial_index(gpkg_path)
 
     # 8. Analyse
     print('[ANALYSE] Calcul spatial et comparaison CP...', flush=True)
@@ -1008,8 +1031,14 @@ if __name__ == '__main__':
     print(f'[ANALYSE]   {len(osm_addresses)}/{len(osm_addresses)}', flush=True)
     print('[ANALYSE] Terminé.', flush=True)
 
+    # Comptage des adresses issues d'un éclatement housenumber multi
+    multi_count = sum(1 for a in osm_addresses_all if a.get('housenumber_raw'))
+
     stats = {
+        'best_postal_codes': len(brussels_postal_codes),
+        'osm_postal_codes':  len(postal_polygons),
         'total_pbf':         len(osm_addresses_all),
+        'multi_housenumber': multi_count,
         'outside_region':    len(outside_region),
         'total':             len(osm_addresses),
         'with_postcode_tag': len(anomalies_postcode_tag),
