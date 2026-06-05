@@ -6,6 +6,10 @@ on:
 jobs:
   compare-postal-codes:
     runs-on: ubuntu-latest
+    env:
+      # Force Python à ne pas bufferiser stdout/stderr — sinon en CI les prints
+      # n'apparaissent qu'à la fin du script (ou jamais si on hit un timeout).
+      PYTHONUNBUFFERED: '1'
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
