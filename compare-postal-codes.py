@@ -26,12 +26,21 @@ import sys
 import os
 import glob
 import json
+import time
 import urllib.request
 import urllib.error
 import zipfile
 import unicodedata
 import re
 from datetime import datetime, date, timedelta
+
+# En CI (GitHub Actions), stdout est block-bufferisé : sans ça les prints
+# ne s'affichent qu'à la fin du script (ou jamais, si on est tué avant).
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except AttributeError:
+    pass  # Python < 3.7
 from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 from shapely.prepared import prep
@@ -68,43 +77,120 @@ def split_bilingual(s):
 # Download helpers
 # ---------------------------------------------------------------------------
 
-def find_latest_best_gpkg_url(max_days=60):
+def find_latest_best_gpkg_url(max_days=60,
+                              per_request_timeout=10,
+                              total_timeout=180,
+                              max_consecutive_timeouts=5):
     """
-    Cherche le GPKG 04000 le plus récent en testant les dates des 60 derniers jours.
+    Cherche le GPKG 04000 le plus récent en testant les dates des `max_days`
+    derniers jours via une requête HEAD.
+
+    Affiche pour chaque date :
+      - le code HTTP retourné, OU
+      - l'exception (timeout, DNS, connexion refusée, ...)
+
+    Abandonne :
+      - après `total_timeout` secondes au total
+      - après `max_consecutive_timeouts` timeouts d'affilée (serveur probablement down)
+      - après `max_days` tentatives infructueuses
     """
-    print('[BeSt] Recherche du GPKG 04000 le plus récent...')
+    print(f'[BeSt] Recherche du GPKG 04000 le plus récent', flush=True)
+    print(f'[BeSt]   max_days={max_days}, '
+          f'per_request_timeout={per_request_timeout}s, '
+          f'total_timeout={total_timeout}s', flush=True)
+    print(f'[BeSt]   URL pattern: {GPKG_BASE_URL}', flush=True)
+
     today = date.today()
+    start = time.monotonic()
+    consecutive_timeouts = 0
+
     for delta in range(max_days):
+        elapsed = time.monotonic() - start
+        if elapsed > total_timeout:
+            print(f'[BeSt] ⏱  Timeout global atteint ({elapsed:.0f}s > {total_timeout}s) — abandon.',
+                  flush=True)
+            break
+
         d = today - timedelta(days=delta)
         date_str = d.strftime('%Y%m%d')
         url = GPKG_BASE_URL.format(date=date_str)
+        prefix = f'[BeSt] [{delta+1:02d}/{max_days}] {date_str}'
+
+        t0 = time.monotonic()
         try:
             req = urllib.request.Request(url, method='HEAD', headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=15) as r:
-                if r.status == 200:
-                    print(f'[BeSt] Fichier trouvé : {date_str} → {url}')
+            with urllib.request.urlopen(req, timeout=per_request_timeout) as r:
+                dt = time.monotonic() - t0
+                status = r.status
+                if status == 200:
+                    size = r.headers.get('Content-Length', '?')
+                    print(f'{prefix} → HTTP 200 ✓ ({dt:.1f}s, Content-Length={size}) — TROUVÉ',
+                          flush=True)
+                    print(f'[BeSt] URL : {url}', flush=True)
                     return d, url
-        except (urllib.error.HTTPError, urllib.error.URLError, Exception):
-            continue
-    print('[ERREUR] Aucun GPKG 04000 trouvé dans les 60 derniers jours.')
+                else:
+                    print(f'{prefix} → HTTP {status} ({dt:.1f}s)', flush=True)
+                    consecutive_timeouts = 0
+
+        except urllib.error.HTTPError as e:
+            dt = time.monotonic() - t0
+            print(f'{prefix} → HTTP {e.code} {e.reason} ({dt:.1f}s)', flush=True)
+            consecutive_timeouts = 0
+
+        except urllib.error.URLError as e:
+            dt = time.monotonic() - t0
+            reason = e.reason
+            is_timeout = isinstance(reason, TimeoutError) or 'timed out' in str(reason).lower()
+            print(f'{prefix} → URLError: {reason} ({dt:.1f}s)', flush=True)
+            if is_timeout:
+                consecutive_timeouts += 1
+            else:
+                consecutive_timeouts = 0
+
+        except TimeoutError as e:
+            dt = time.monotonic() - t0
+            print(f'{prefix} → TimeoutError ({dt:.1f}s)', flush=True)
+            consecutive_timeouts += 1
+
+        except Exception as e:
+            dt = time.monotonic() - t0
+            print(f'{prefix} → {type(e).__name__}: {e} ({dt:.1f}s)', flush=True)
+            consecutive_timeouts = 0  # autre erreur, on ne compte pas comme timeout
+
+        if consecutive_timeouts >= max_consecutive_timeouts:
+            print(f'[BeSt] ⚠  {consecutive_timeouts} timeouts consécutifs — '
+                  f'le serveur urbisdownload.datastore.brussels semble indisponible. Abandon.',
+                  flush=True)
+            break
+
+    print(f'[ERREUR] Aucun GPKG 04000 trouvé après {delta+1} tentatives '
+          f'({time.monotonic()-start:.0f}s écoulés).', flush=True)
     sys.exit(1)
 
 
 def download(url, dest):
-    print(f'[DL] Téléchargement de {os.path.basename(url)}...')
+    print(f'[DL] Téléchargement de {os.path.basename(url)}...', flush=True)
+    print(f'[DL]   URL: {url}', flush=True)
+    t0 = time.monotonic()
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=300) as r:
         total = int(r.headers.get('Content-Length', 0))
+        print(f'[DL]   HTTP {r.status}, Content-Length={total} bytes', flush=True)
         downloaded = 0
+        last_pct_logged = -5
         with open(dest, 'wb') as f:
             while chunk := r.read(65536):
                 f.write(chunk)
                 downloaded += len(chunk)
                 if total > 0:
                     pct = min(downloaded * 100 // total, 100)
-                    print(f'\r    {pct}%', end='', flush=True)
-    print()
-    print(f'[DL] Sauvegardé : {dest}')
+                    # Log un newline tous les 10% (compatible CI, contrairement à \r)
+                    if pct >= last_pct_logged + 10:
+                        print(f'[DL]   {pct:3d}%  ({downloaded/1_000_000:.1f}/{total/1_000_000:.1f} MB)',
+                              flush=True)
+                        last_pct_logged = pct
+    dt = time.monotonic() - t0
+    print(f'[DL] Sauvegardé : {dest} ({downloaded/1_000_000:.1f} MB en {dt:.1f}s)', flush=True)
 
 
 def extract_gpkg(zip_path):
@@ -600,6 +686,10 @@ def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
+    print(f'[START] {datetime.now().isoformat(timespec="seconds")} — '
+          f'compare-postal-codes.py', flush=True)
+    print(f'[START] Python {sys.version.split()[0]}, cwd={os.getcwd()}', flush=True)
+
     # 1. GPKG BeSt
     existing_gpkg = sorted(
         glob.glob('BeStBrussels_31370_GPKG_04000*.gpkg') +
