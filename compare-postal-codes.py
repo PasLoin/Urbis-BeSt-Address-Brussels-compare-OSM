@@ -41,7 +41,7 @@ try:
     sys.stderr.reconfigure(line_buffering=True)
 except AttributeError:
     pass  # Python < 3.7
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, LineString
 from shapely.ops import unary_union
 from shapely.prepared import prep
 import geopandas as gpd
@@ -803,14 +803,37 @@ class AddressCollector(osmium.SimpleHandler):
         if not w.tags.get('addr:housenumber'):
             return
         try:
-            lats, lons = [], []
+            coords = []
             for nd in w.nodes:
                 if nd.location.valid():
-                    lats.append(nd.location.lat)
-                    lons.append(nd.location.lon)
-            if lats:
-                self._process('way', w.id, w.tags,
-                              sum(lats)/len(lats), sum(lons)/len(lons))
+                    coords.append((nd.location.lon, nd.location.lat))
+            if len(coords) < 2:
+                return
+
+            # Way fermée (premier == dernier nœud) → polygone (typiquement
+            # un bâtiment). On utilise le vrai centroïde géométrique, pas la
+            # moyenne arithmétique des nœuds (qui peut tomber très à côté pour
+            # un L, un U ou un polygone non-convexe).
+            # Way ouverte → on prend le centroïde de la LineString (point
+            # médian le long du tracé).
+            geom = None
+            if coords[0] == coords[-1] and len(coords) >= 4:
+                try:
+                    geom = Polygon(coords)
+                    if not geom.is_valid:
+                        geom = geom.buffer(0)
+                    if geom.is_empty:
+                        geom = None
+                except Exception:
+                    geom = None
+            if geom is None:
+                geom = LineString(coords)
+
+            c = geom.centroid
+            if c.is_empty:
+                return
+            # _process attend (lat, lon)
+            self._process('way', w.id, w.tags, c.y, c.x)
         except Exception:
             pass
 
