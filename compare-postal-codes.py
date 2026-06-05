@@ -854,7 +854,7 @@ def load_osm_addresses(pbf_path):
 # ---------------------------------------------------------------------------
 
 def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
-                 not_in_best, outside_region, stats, best_date):
+                 outside_region, stats, best_date):
     today = date.today().isoformat()
     L = []
     L.append('=' * 72)
@@ -879,7 +879,6 @@ def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
     L.append(f'  Adresses OSM analysées (intra-RBC)   : {stats["total"]:>6}')
     L.append(f'    Avec addr:postcode (anomalie)      : {stats["with_postcode_tag"]:>6}')
     L.append(f'    Hors zone boundary=postal_code OSM : {stats["no_postal_zone"]:>6}')
-    L.append(f'    Adresse absente du BeSt            : {stats["not_in_best"]:>6}')
     L.append(f'    CP OSM ≠ CP BeSt (à vérifier)      : {stats["mismatches"]:>6}')
     L.append(f'    CP OSM = CP BeSt (OK)              : {stats["ok"]:>6}')
     L.append('')
@@ -920,20 +919,6 @@ def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
             ref = f'{a["osm_type"]}/{a["osm_id"]}'
             L.append(f'  {ref:<22} {a["street"][:31]:<33} {a["housenumber"]:<8} '
                      f'{a.get("cp_best","?")}')
-    else:
-        L.append('  (aucune)')
-    L.append('')
-
-    L.append('ADRESSES OSM SANS CORRESPONDANCE DANS LE BeSt')
-    L.append('(rue+numéro introuvable dans le GPKG BeSt)')
-    L.append('-' * 40)
-    if not_in_best:
-        L.append(f'  {"OSM ref":<22} {"Rue":<33} {"N°":<8} {"CP OSM calculé"}')
-        L.append(f'  {"-"*20:<22} {"-"*31:<33} {"-"*6:<8} {"-"*14}')
-        for a in sorted(not_in_best, key=lambda x: x['street']):
-            ref = f'{a["osm_type"]}/{a["osm_id"]}'
-            L.append(f'  {ref:<22} {a["street"][:31]:<33} {a["housenumber"]:<8} '
-                     f'{a.get("cp_osm","?")}')
     else:
         L.append('  (aucune)')
     L.append('')
@@ -1024,7 +1009,7 @@ if __name__ == '__main__':
     prepared_cache = {}
     mismatches     = []
     no_postal_zone = []
-    not_in_best    = []
+    not_in_best_count = 0  # compteur uniquement (log), pas exporté dans le rapport
     ok_count       = 0
 
     for i, addr in enumerate(osm_addresses):
@@ -1044,7 +1029,7 @@ if __name__ == '__main__':
             no_postal_zone.append(addr)
             continue
         if cp_best is None:
-            not_in_best.append(addr)
+            not_in_best_count += 1
             continue
         if cp_osm != cp_best:
             mismatches.append(addr)
@@ -1052,7 +1037,9 @@ if __name__ == '__main__':
             ok_count += 1
 
     print(f'[ANALYSE]   {len(osm_addresses)}/{len(osm_addresses)}', flush=True)
-    print('[ANALYSE] Terminé.', flush=True)
+    print(f'[ANALYSE] Terminé. {not_in_best_count} adresses ignorées '
+          f'(rue+numéro absent de BeSt — couvert par un autre rapport).',
+          flush=True)
 
     # Comptage des adresses issues d'un éclatement housenumber multi
     multi_count = sum(1 for a in osm_addresses_all if a.get('housenumber_raw'))
@@ -1066,7 +1053,6 @@ if __name__ == '__main__':
         'total':             len(osm_addresses),
         'with_postcode_tag': len(anomalies_postcode_tag),
         'no_postal_zone':    len(no_postal_zone),
-        'not_in_best':       len(not_in_best),
         'mismatches':        len(mismatches),
         'ok':                ok_count,
     }
@@ -1075,7 +1061,6 @@ if __name__ == '__main__':
         anomalies_postcode_tag=anomalies_postcode_tag,
         mismatches=mismatches,
         no_postal_zone=no_postal_zone,
-        not_in_best=not_in_best,
         outside_region=outside_region,
         stats=stats,
         best_date=best_date,
