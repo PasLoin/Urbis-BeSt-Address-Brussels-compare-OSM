@@ -26,13 +26,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install geopandas pyogrio osmium shapely scipy pyproj
-      - name: Run postal code comparison
-        run: python3 compare-postal-codes.py
-      - name: Upload report and debug GeoJSON
+      - name: Run postal code + associatedStreet checks
+        run: python3 compare-postal-codes-and-associetedStreet.py
+      - name: Upload reports and debug GeoJSON
         uses: actions/upload-artifact@v4
         with:
-          name: postal-code-report-${{ github.run_id }}
+          name: reports-${{ github.run_id }}
           path: |
             postal_code_report_*.txt
+            associated-streets-report.txt
             postal_codes_geojson/**
           retention-days: 90
