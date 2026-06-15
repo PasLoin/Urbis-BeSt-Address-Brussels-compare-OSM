@@ -1,79 +1,84 @@
 #!/usr/bin/env python3
 """
-compare-postal-codes.py
+Vérifications OSM combinées pour la Région de Bruxelles-Capitale.
 
-Pour chaque adresse OSM dans la région bruxelloise :
-  1. Si addr:postcode est présent → loggé en anomalie, le code postal
-     est quand même calculé spatialement (on ignore addr:postcode)
-  2. Code postal calculé spatialement (point-in-polygon dans les relations
-     boundary=postal_code OSM)
-  3. Match avec le code postal BeSt (haspostalinfo_objectidentifier) via
-     join spatial sur (lon, lat) + numéro normalisé
-  4. Si mismatch → inclus dans le rapport "CP à vérifier"
+=== Partie 1 : relations associatedStreet ===
+  - Tags manquants : addr:city, addr:country, addr:postcode
+  - Doublons (même name + city + postcode)
+  - Adresses (addr:housenumber + addr:street) appartenant à plusieurs
+    relations associatedStreet DISTINCTES.
+    NB : un objet référencé deux fois dans LA MÊME relation (cas courant
+    d'un node portant addr:housenumber="4;6", inscrit une fois par numéro)
+    n'est PAS considéré comme une erreur et est donc exclu.
+  -> écrit : associated-streets-report.txt
 
-En plus du rapport texte, le script exporte un GeoJSON par code postal OSM
-(plus un combiné) dans `postal_codes_geojson/` pour debug visuel
-(JOSM, QGIS, geojson.io…).
 
-Source BeSt : GPKG sectionID=04000, URL directe.
-Source OSM  : PBF Brussels daily.
-Sortie      : postal_code_report_YYYY-MM-DD.txt
-              postal_codes_geojson/postal_code_XXXX.geojson  (un par CP)
-              postal_codes_geojson/_all_postal_codes.geojson (combiné)
+
+=== Partie 2 : comparaison des codes postaux par adresse ===
+  BeSt Address vs OpenStreetMap (calcul spatial point-in-polygon +
+  matching spatial avec numéro normalisé).
+  -> écrit : postal_code_report_YYYY-MM-DD.txt
+             postal_codes_geojson/ (debug visuel)
+
+
 """
 
 import sys
 import os
 import glob
-import json
 import time
 import urllib.request
 import urllib.error
 import zipfile
 import unicodedata
 import re
+from collections import defaultdict
 from datetime import datetime, date, timedelta
 
-# En CI (GitHub Actions), stdout est block-bufferisé : sans ça les prints
-# ne s'affichent qu'à la fin du script (ou jamais, si on est tué avant).
 try:
     sys.stdout.reconfigure(line_buffering=True)
     sys.stderr.reconfigure(line_buffering=True)
 except AttributeError:
     pass  # Python < 3.7
+
 from shapely.geometry import Point, Polygon, LineString
 from shapely.ops import unary_union
 from shapely.prepared import prep
 import geopandas as gpd
 import osmium
+from scipy.spatial import cKDTree
+import numpy as np
+from pyproj import Transformer
 
-GPKG_BASE_URL = 'https://urbisdownload.datastore.brussels/BeSt/FullDownload/GPKG/BeStBrussels_31370_GPKG_04000_{date}.zip'
-OSM_PBF_URL   = 'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/history/Brussels-daily.pbf'
-OSM_PBF_FILE  = 'brussels_capital_region-latest.osm.pbf'
-HEADERS       = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
 
-GEOJSON_DIR   = 'postal_codes_geojson'
+# ===========================================================================
+# Constantes partagées
+# ===========================================================================
 
-# Polygone officiel de la Région de Bruxelles-Capitale.
-# Le PBF est généré avec un buffer (~100m) autour de cette région, donc :
-#   - certaines adresses du PBF sont hors région → à filtrer
-#   - certaines relations boundary=postal_code touchent juste le bord
-#     (ex: 1800 Vilvoorde, relation 3366255) : seules quelques ways sont
-#     présentes, le polygone est reconstruit avec une "ligne droite imaginaire"
-#     et déborde sur des CP voisins (1120) → à rejeter
+OSM_PBF_FILE = 'brussels_capital_region-latest.osm.pbf'
+OSM_PBF_URL = (
+    'https://raw.githubusercontent.com/PasLoin/'
+    'Osm-python-analyse_Belgium/main/pbf_analyse/history/Brussels-daily.pbf'
+)
+HEADERS = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
+
+ASSOC_STREETS_OUTPUT = 'associated-streets-report.txt'
+REQUIRED_TAGS = ('addr:city', 'addr:country', 'addr:postcode')
+
+GPKG_BASE_URL = ('https://urbisdownload.datastore.brussels/BeSt/FullDownload/GPKG/'
+                 'BeStBrussels_31370_GPKG_04000_{date}.zip')
+GEOJSON_DIR = 'postal_codes_geojson'
 BOUNDARY_RELATION_ID = 54094
-BOUNDARY_POLY_URL    = f'https://polygons.openstreetmap.fr/get_poly.py?id={BOUNDARY_RELATION_ID}'
-REGION_POLY_CACHE    = f'region_{BOUNDARY_RELATION_ID}.poly'
+BOUNDARY_POLY_URL = f'https://polygons.openstreetmap.fr/get_poly.py?id={BOUNDARY_RELATION_ID}'
+REGION_POLY_CACHE = f'region_{BOUNDARY_RELATION_ID}.poly'
 
-# La whitelist des CP légitimes est construite dynamiquement depuis BeSt
-# (cf. load_best_spatial_index) — elle inclut automatiquement les codes
-# postaux spéciaux (parlement, institutions...) qui ne sont pas dans la
-# liste classique des 19 communes.
+_TRANSFORMER = Transformer.from_crs("EPSG:31370", "EPSG:4326", always_xy=True)
+_SEARCH_RADIUS_DEG = 0.00045  # ~50m à Bruxelles
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Helpers communs
+# ===========================================================================
 
 def normalize(s):
     if not s:
@@ -84,14 +89,285 @@ def normalize(s):
     s = ' '.join(s.split())
     return s
 
-def split_bilingual(s):
-    s = normalize(s)
-    return [p for p in re.split(r' [-\u2013\u2014] ', s) if p]
+
+def download(url, dest):
+    print(f'[DL] Téléchargement de {os.path.basename(url)}...', flush=True)
+    print(f'[DL]   URL: {url}', flush=True)
+    t0 = time.monotonic()
+    req = urllib.request.Request(url, headers=HEADERS)
+    with urllib.request.urlopen(req, timeout=300) as r:
+        total = int(r.headers.get('Content-Length', 0))
+        print(f'[DL]   HTTP {r.status}, Content-Length={total} bytes', flush=True)
+        downloaded = 0
+        last_pct_logged = -5
+        with open(dest, 'wb') as f:
+            while chunk := r.read(65536):
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total > 0:
+                    pct = min(downloaded * 100 // total, 100)
+                    if pct >= last_pct_logged + 10:
+                        print(f'[DL]   {pct:3d}%  ({downloaded/1_000_000:.1f}/{total/1_000_000:.1f} MB)',
+                              flush=True)
+                        last_pct_logged = pct
+    dt = time.monotonic() - t0
+    print(f'[DL] Sauvegardé : {dest} ({downloaded/1_000_000:.1f} MB en {dt:.1f}s)', flush=True)
 
 
-# ---------------------------------------------------------------------------
-# Download helpers
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# PARTIE 1 : relations associatedStreet
+# ===========================================================================
+
+class AssociatedStreetCollector(osmium.SimpleHandler):
+    """Collecte toutes les relations type=associatedStreet, avec leurs membres."""
+
+    def __init__(self):
+        super().__init__()
+        self.relations = []
+        # (type_char, ref) -> liste des relation ids dont l'objet est membre
+        # (peut contenir des doublons si l'objet est référencé plusieurs fois
+        #  dans LA MÊME relation, ex: addr:housenumber="4;6")
+        self.member_to_relations = defaultdict(list)
+
+    def relation(self, r):
+        if r.tags.get('type') != 'associatedStreet':
+            return
+        tags = {t.k: t.v for t in r.tags}
+        members = []
+        for m in r.members:
+            members.append({'type': m.type, 'ref': m.ref, 'role': m.role})
+            key = (m.type, m.ref)
+            self.member_to_relations[key].append(r.id)
+
+        self.relations.append({'id': r.id, 'tags': tags, 'members': members})
+
+
+class AddressTagCollector(osmium.SimpleHandler):
+    """
+    Seconde passe : pour chaque objet membre de ≥2 relations associatedStreet
+    distinctes, récupère ses tags addr:* pour le rapport.
+    """
+
+    def __init__(self, wanted_keys):
+        super().__init__()
+        self.wanted = wanted_keys
+        self.addr_tags = {}
+
+    def _collect(self, type_char, obj):
+        key = (type_char, obj.id)
+        if key not in self.wanted:
+            return
+        tags = {t.k: t.v for t in obj.tags if t.k.startswith('addr:')}
+        if tags:
+            self.addr_tags[key] = tags
+
+    def node(self, n):
+        self._collect('n', n)
+
+    def way(self, w):
+        self._collect('w', w)
+
+    def relation(self, r):
+        self._collect('r', r)
+
+
+def check_missing_tags(relations):
+    issues = []
+    for rel in relations:
+        missing = [t for t in REQUIRED_TAGS if t not in rel['tags']]
+        if missing:
+            issues.append((rel, missing))
+    return issues
+
+
+def _values_conflict(a, b):
+    """True seulement si les deux valeurs sont non vides ET différentes."""
+    return bool(a) and bool(b) and a != b
+
+
+def check_duplicates(relations):
+    """
+    Groupe par name, puis regroupe en clusters les relations qui ne sont
+    PAS différenciées par addr:city ou addr:postcode (une valeur vide est
+    compatible avec n'importe quelle valeur).
+    """
+    by_name = defaultdict(list)
+    for rel in relations:
+        name = rel['tags'].get('name', '').strip()
+        if not name:
+            continue
+        by_name[name].append(rel)
+
+    duplicates = {}
+    for name, rels in by_name.items():
+        if len(rels) < 2:
+            continue
+        parent = list(range(len(rels)))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(x, y):
+            parent[find(x)] = find(y)
+
+        for i in range(len(rels)):
+            ci = rels[i]['tags'].get('addr:city', '').strip()
+            pi = rels[i]['tags'].get('addr:postcode', '').strip()
+            for j in range(i + 1, len(rels)):
+                cj = rels[j]['tags'].get('addr:city', '').strip()
+                pj = rels[j]['tags'].get('addr:postcode', '').strip()
+                if not _values_conflict(ci, cj) and not _values_conflict(pi, pj):
+                    union(i, j)
+
+        clusters = defaultdict(list)
+        for i in range(len(rels)):
+            clusters[find(i)].append(rels[i])
+        for cluster in clusters.values():
+            if len(cluster) > 1:
+                r0 = cluster[0]
+                city = r0['tags'].get('addr:city', '').strip()
+                postcode = r0['tags'].get('addr:postcode', '').strip()
+                duplicates[(name, city, postcode)] = cluster
+
+    return duplicates
+
+
+_TYPE_LABELS = {'n': 'node', 'w': 'way', 'r': 'relation'}
+
+
+def check_multi_membership(handler, pbf_path):
+    """
+    Trouve les objets adresse (addr:housenumber + addr:street) appartenant à
+    ≥2 relations associatedStreet DISTINCTES.
+
+    Un objet peut être référencé plusieurs fois dans la liste de membres
+    d'UNE SEULE relation (cas fréquent : un node porte
+    addr:housenumber="4;6" et est inscrit une fois par numéro dans la même
+    relation). Ce n'est pas une erreur, donc on ne retient l'objet que s'il
+    appartient à au moins deux relations *différentes* (set des relation ids).
+    """
+    multi = {
+        key: rel_ids
+        for key, rel_ids in handler.member_to_relations.items()
+        if len(set(rel_ids)) >= 2
+    }
+    if not multi:
+        return []
+
+    print(f'[OSM] Passe 2 : récupération des tags addr:* pour {len(multi)} objets multi-relations...')
+    tag_collector = AddressTagCollector(set(multi.keys()))
+    tag_collector.apply_file(pbf_path)
+
+    results = []
+    for key, rel_ids in sorted(multi.items()):
+        type_char, ref = key
+        addr_tags = tag_collector.addr_tags.get(key, {})
+        if 'addr:housenumber' not in addr_tags or 'addr:street' not in addr_tags:
+            continue
+        results.append({
+            'type': type_char,
+            'ref': ref,
+            'addr_tags': addr_tags,
+            'relation_ids': sorted(set(rel_ids)),
+        })
+
+    return results
+
+
+def write_associated_streets_report(relations, missing_issues, duplicates,
+                                     multi_membership, rel_tags_map, path):
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('=== associatedStreet relations – Rapport de vérification ===\n')
+        f.write(f'Total relations analysées : {len(relations)}\n\n')
+
+        # --- Tags manquants --------------------------------------------
+        f.write(f'--- Tags manquants ({len(missing_issues)} relations) ---\n\n')
+        if not missing_issues:
+            f.write('Aucun problème détecté.\n\n')
+        for rel, missing in missing_issues:
+            rid = rel['id']
+            name = rel['tags'].get('name', '(sans nom)')
+            f.write(
+                f'  relation/{rid}  {name}\n'
+                f'    manquant : {", ".join(missing)}\n'
+                f'    https://www.openstreetmap.org/relation/{rid}\n\n'
+            )
+
+        # --- Doublons -----------------------------------------------------
+        dup_count = sum(len(v) for v in duplicates.values())
+        f.write(f'--- Doublons (même name + city + postcode) '
+                f'({dup_count} relations dans {len(duplicates)} groupes) ---\n\n')
+        if not duplicates:
+            f.write('Aucun doublon détecté.\n\n')
+        for (name, city, postcode), rels in sorted(duplicates.items()):
+            ctx = f'city={city or "(vide)"}  postcode={postcode or "(vide)"}'
+            f.write(f'  « {name} »  ({ctx})\n')
+            for rel in rels:
+                f.write(
+                    f'    relation/{rel["id"]}  '
+                    f'https://www.openstreetmap.org/relation/{rel["id"]}\n'
+                )
+            f.write('\n')
+
+        # --- Multi-membership ----------------------------------------------
+        f.write(f'--- Adresses (addr:housenumber + addr:street) dans plusieurs '
+                f'associatedStreet distinctes ({len(multi_membership)} objets) ---\n\n')
+        if not multi_membership:
+            f.write('Aucun problème détecté.\n\n')
+        for item in multi_membership:
+            type_label = _TYPE_LABELS.get(item['type'], item['type'])
+            ref = item['ref']
+            addr = item['addr_tags']
+            rel_ids = item['relation_ids']
+
+            f.write(f'  {type_label}/{ref}')
+            if addr:
+                hn = addr.get('addr:housenumber', '')
+                st = addr.get('addr:street', '')
+                if hn or st:
+                    f.write(f'  ({hn} {st})'.rstrip())
+            f.write(f'\n    https://www.openstreetmap.org/{type_label}/{ref}\n')
+
+            f.write(f'    membre de {len(rel_ids)} relations :\n')
+            for rid in rel_ids:
+                rname = rel_tags_map.get(rid, {}).get('name', '(sans nom)')
+                f.write(
+                    f'      relation/{rid}  {rname}  '
+                    f'https://www.openstreetmap.org/relation/{rid}\n'
+                )
+            f.write('\n')
+
+    print(f'[OK] Rapport écrit : {path}')
+
+
+def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT):
+    print(f'[OSM] Lecture des relations associatedStreet dans {pbf_path}...')
+    handler = AssociatedStreetCollector()
+    handler.apply_file(pbf_path)
+    relations = handler.relations
+    print(f'[OSM] {len(relations)} relations associatedStreet trouvées')
+
+    missing_issues = check_missing_tags(relations)
+    print(f'[CHECK] {len(missing_issues)} relations avec tags manquants')
+
+    duplicates = check_duplicates(relations)
+    print(f'[CHECK] {len(duplicates)} groupes de doublons')
+
+    multi_membership = check_multi_membership(handler, pbf_path)
+    print(f'[CHECK] {len(multi_membership)} adresses dans ≥2 associatedStreet distinctes')
+
+    rel_tags_map = {rel['id']: rel['tags'] for rel in relations}
+
+    write_associated_streets_report(relations, missing_issues, duplicates,
+                                     multi_membership, rel_tags_map, output_path)
+
+
+# ===========================================================================
+# PARTIE 2 : comparaison des codes postaux par adresse
+# ===========================================================================
 
 def find_latest_best_gpkg_url(max_days=60,
                               per_request_timeout=10,
@@ -100,15 +376,6 @@ def find_latest_best_gpkg_url(max_days=60,
     """
     Cherche le GPKG 04000 le plus récent en testant les dates des `max_days`
     derniers jours via une requête HEAD.
-
-    Affiche pour chaque date :
-      - le code HTTP retourné, OU
-      - l'exception (timeout, DNS, connexion refusée, ...)
-
-    Abandonne :
-      - après `total_timeout` secondes au total
-      - après `max_consecutive_timeouts` timeouts d'affilée (serveur probablement down)
-      - après `max_days` tentatives infructueuses
     """
     print(f'[BeSt] Recherche du GPKG 04000 le plus récent', flush=True)
     print(f'[BeSt]   max_days={max_days}, '
@@ -171,7 +438,7 @@ def find_latest_best_gpkg_url(max_days=60,
         except Exception as e:
             dt = time.monotonic() - t0
             print(f'{prefix} → {type(e).__name__}: {e} ({dt:.1f}s)', flush=True)
-            consecutive_timeouts = 0  # autre erreur, on ne compte pas comme timeout
+            consecutive_timeouts = 0
 
         if consecutive_timeouts >= max_consecutive_timeouts:
             print(f'[BeSt] ⚠  {consecutive_timeouts} timeouts consécutifs — '
@@ -182,31 +449,6 @@ def find_latest_best_gpkg_url(max_days=60,
     print(f'[ERREUR] Aucun GPKG 04000 trouvé après {delta+1} tentatives '
           f'({time.monotonic()-start:.0f}s écoulés).', flush=True)
     sys.exit(1)
-
-
-def download(url, dest):
-    print(f'[DL] Téléchargement de {os.path.basename(url)}...', flush=True)
-    print(f'[DL]   URL: {url}', flush=True)
-    t0 = time.monotonic()
-    req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=300) as r:
-        total = int(r.headers.get('Content-Length', 0))
-        print(f'[DL]   HTTP {r.status}, Content-Length={total} bytes', flush=True)
-        downloaded = 0
-        last_pct_logged = -5
-        with open(dest, 'wb') as f:
-            while chunk := r.read(65536):
-                f.write(chunk)
-                downloaded += len(chunk)
-                if total > 0:
-                    pct = min(downloaded * 100 // total, 100)
-                    # Log un newline tous les 10% (compatible CI, contrairement à \r)
-                    if pct >= last_pct_logged + 10:
-                        print(f'[DL]   {pct:3d}%  ({downloaded/1_000_000:.1f}/{total/1_000_000:.1f} MB)',
-                              flush=True)
-                        last_pct_logged = pct
-    dt = time.monotonic() - t0
-    print(f'[DL] Sauvegardé : {dest} ({downloaded/1_000_000:.1f} MB en {dt:.1f}s)', flush=True)
 
 
 def extract_gpkg(zip_path):
@@ -226,21 +468,10 @@ def extract_gpkg(zip_path):
         return gpkg_name
 
 
-# ---------------------------------------------------------------------------
-# BeSt : index spatial (lon_wgs84, lat_wgs84, norm_housenumber) → postal_code
-# ---------------------------------------------------------------------------
-
-from scipy.spatial import cKDTree
-import numpy as np
-from pyproj import Transformer
-
-_TRANSFORMER = Transformer.from_crs("EPSG:31370", "EPSG:4326", always_xy=True)
-
-
 def load_best_spatial_index(gpkg_path):
     """
-    Retourne (kdtree, lons, lats, norm_nbrs, postcodes) sur les adresses BeSt current.
-    KDTree indexé sur (lon, lat) WGS84.
+    Retourne (kdtree, lons, lats, norm_nbrs, postcodes, whitelist) sur les
+    adresses BeSt current. KDTree indexé sur (lon, lat) WGS84.
     """
     print(f'[BeSt] Lecture spatiale de {gpkg_path}...')
     addr_gdf = gpd.read_file(gpkg_path, layer='BrusselsAddressL72_04000')
@@ -285,15 +516,10 @@ def load_best_spatial_index(gpkg_path):
     return tree, lons, lats, norm_nbrs, postcodes, brussels_postal_codes
 
 
-# Rayon de recherche en degrés (~50m à Bruxelles : 0.00045°)
-_SEARCH_RADIUS_DEG = 0.00045
-
-
 def lookup_best_zipcode(lon, lat, norm_nbr, tree, lons, lats, norm_nbrs, postcodes):
     """
     Cherche dans le KDTree BeSt le point le plus proche du point OSM (lon, lat)
     ayant le même numéro normalisé, dans un rayon de 50m.
-    Retourne le code postal BeSt ou None.
     """
     idxs = tree.query_ball_point([lon, lat], r=_SEARCH_RADIUS_DEG)
     if not idxs:
@@ -305,21 +531,15 @@ def lookup_best_zipcode(lon, lat, norm_nbr, tree, lons, lats, norm_nbrs, postcod
     return postcodes[best]
 
 
-# ---------------------------------------------------------------------------
-# OSM pass 1 : polygones boundary=postal_code
-# ---------------------------------------------------------------------------
-
 class PostalCodeHandler(osmium.SimpleHandler):
-    """
-    Collecte en une seule passe :
-    - les relations boundary=postal_code (way members + tags)
-    - les coords de tous les ways nécessaires
-    """
+    """Collecte les relations boundary=postal_code (way members + tags) et
+    les coordonnées de tous les ways nécessaires."""
+
     def __init__(self):
         super().__init__()
-        self.relations   = {}   # pc → list of (way_id, role)
-        self.relation_ids = {}  # pc → osm relation id
-        self.ways        = {}   # way_id → [(lon, lat), ...]
+        self.relations    = {}   # pc -> [(way_id, role), ...]
+        self.relation_ids = {}   # pc -> osm relation id
+        self.ways         = {}   # way_id -> [(lon, lat), ...]
 
     def way(self, w):
         coords = []
@@ -339,11 +559,12 @@ class PostalCodeHandler(osmium.SimpleHandler):
             self.relation_ids[pc] = r.id
 
 
+def _close_enough(p1, p2, tol=1e-7):
+    return abs(p1[0]-p2[0]) < tol and abs(p1[1]-p2[1]) < tol
+
+
 def _chain_ways(segments):
-    """
-    Assemble une liste de segments (listes de coordonnées) en anneaux fermés.
-    Retourne une liste d'anneaux (chaque anneau = liste de (lon,lat) fermée).
-    """
+    """Assemble une liste de segments en anneaux fermés."""
     segs = [list(s) for s in segments if len(s) >= 2]
     rings = []
 
@@ -383,10 +604,6 @@ def _chain_ways(segments):
     return rings
 
 
-def _close_enough(p1, p2, tol=1e-7):
-    return abs(p1[0]-p2[0]) < tol and abs(p1[1]-p2[1]) < tol
-
-
 def _safe_polygon(coords):
     """Construit un Polygon valide depuis une liste de coords, en réparant si besoin."""
     try:
@@ -400,18 +617,10 @@ def _safe_polygon(coords):
     return p
 
 
-# ---------------------------------------------------------------------------
-# Polygone de la Région de Bruxelles-Capitale (filtre buffer + clip CP)
-# ---------------------------------------------------------------------------
-
 def _parse_poly_file(text):
-    """
-    Parse le format Osmosis .poly servi par polygons.openstreetmap.fr.
-    Retourne une liste de (is_hole: bool, ring: [(lon, lat), ...]).
-    Format : https://wiki.openstreetmap.org/wiki/Osmosis/Polygon_Filter_File_Format
-    """
+    """Parse le format Osmosis .poly. Retourne [(is_hole, [(lon,lat),...]), ...]."""
     rings = []
-    state = 'header'   # header → between_sections → in_section → ...
+    state = 'header'
     is_hole = False
     current = []
 
@@ -420,12 +629,11 @@ def _parse_poly_file(text):
         if not line:
             continue
         if state == 'header':
-            # 1re ligne non vide = identifiant du fichier, on l'ignore
             state = 'between_sections'
             continue
         if state == 'between_sections':
             if line == 'END':
-                break  # fin du fichier
+                break
             is_hole = line.startswith('!')
             current = []
             state = 'in_section'
@@ -485,10 +693,7 @@ def _build_region_polygon(rings):
 
 
 def fetch_region_polygon():
-    """
-    Récupère le polygone de la RBC depuis polygons.openstreetmap.fr.
-    Avec cache local et retry simple.
-    """
+    """Récupère le polygone de la RBC depuis polygons.openstreetmap.fr (avec cache)."""
     if os.path.isfile(REGION_POLY_CACHE):
         print(f'[REGION] Cache trouvé : {REGION_POLY_CACHE}', flush=True)
         with open(REGION_POLY_CACHE, 'r', encoding='utf-8') as f:
@@ -506,7 +711,6 @@ def fetch_region_polygon():
                 dt = time.monotonic() - t0
                 print(f'[REGION] Tentative {attempt+1} → HTTP {r.status} '
                       f'({len(text)} bytes en {dt:.1f}s)', flush=True)
-                # Sanity-check : un vrai .poly contient au moins un "END"
                 if 'END' in text and len(text) > 100:
                     break
                 print(f'[REGION] Réponse suspecte (pas un .poly valide), retry...',
@@ -541,10 +745,8 @@ def fetch_region_polygon():
 
 def filter_postal_polygons_to_region(postal_polygons, region_poly, whitelist):
     """
-    1. Rejette tout polygone dont le code postal n'est pas dans `whitelist`
-       (typiquement l'ensemble des CP distincts du GPKG BeSt) → gomme
-       les 1800, 1830, 1850 etc. mal reconstruits depuis le PBF tampon.
-    2. Clip les polygones gardés à la Région (gomme les débordements de bord).
+    1. Rejette tout polygone dont le CP n'est pas dans `whitelist` (BeSt).
+    2. Clip les polygones gardés à la Région.
     """
     filtered = {}
     rejected_whitelist = []
@@ -580,10 +782,7 @@ def filter_postal_polygons_to_region(postal_polygons, region_poly, whitelist):
 
 
 def build_postal_polygons(pbf_path):
-    """
-    Construit les polygones boundary=postal_code à partir du PBF.
-    Assigne correctement chaque inner ring à l'outer qui le contient.
-    """
+    """Construit les polygones boundary=postal_code à partir du PBF."""
     print('[PC] Collecte des relations boundary=postal_code...')
     handler = PostalCodeHandler()
     handler.apply_file(pbf_path, locations=True)
@@ -616,7 +815,6 @@ def build_postal_polygons(pbf_path):
                 print(f'[WARN] CP {pc} : impossible d\'assembler les rings outer')
                 continue
 
-            # Convertir les inner rings en polygones une fois pour all (pour test de containment)
             inner_polys = []
             for iring in inner_rings:
                 ip = _safe_polygon(iring)
@@ -629,14 +827,13 @@ def build_postal_polygons(pbf_path):
                 if outer_poly is None:
                     continue
 
-                # Assigner UNIQUEMENT les inner rings contenus dans CET outer
                 holes_coords = []
                 for ip in inner_polys:
                     if outer_poly.contains(ip):
                         try:
                             holes_coords.append(list(ip.exterior.coords))
                         except AttributeError:
-                            pass  # buffer(0) a transformé en MultiPolygon, on ignore
+                            pass
 
                 if holes_coords:
                     try:
@@ -667,11 +864,7 @@ def build_postal_polygons(pbf_path):
 
 def export_postal_polygons_geojson(postal_polygons, relation_ids,
                                    region_poly=None, output_dir=GEOJSON_DIR):
-    """
-    Debug : exporte chaque polygone postal_code OSM en GeoJSON séparé,
-    plus un fichier combiné `_all_postal_codes.geojson`.
-    À ouvrir dans QGIS, JOSM, geojson.io, …
-    """
+    """Debug : exporte chaque polygone postal_code OSM en GeoJSON (+ combiné + région)."""
     if not postal_polygons:
         print('[GEOJSON] Aucun polygone à exporter.')
         return
@@ -689,7 +882,6 @@ def export_postal_polygons_geojson(postal_polygons, relation_ids,
             'geometry_type': geom.geom_type,
             'area_deg2':     round(geom.area, 8),
         }
-        # Fichier individuel
         try:
             gdf = gpd.GeoDataFrame([props], geometry=[geom], crs='EPSG:4326')
             out_path = os.path.join(output_dir, f'postal_code_{pc}.geojson')
@@ -699,7 +891,6 @@ def export_postal_polygons_geojson(postal_polygons, relation_ids,
             continue
         records.append((props, geom))
 
-    # Fichier combiné
     if records:
         try:
             gdf = gpd.GeoDataFrame(
@@ -712,7 +903,6 @@ def export_postal_polygons_geojson(postal_polygons, relation_ids,
         except Exception as e:
             print(f'[WARN] Export GeoJSON combiné échoué : {e}')
 
-    # Polygone de la Région (pour overlay visuel sur les CP)
     if region_poly is not None:
         try:
             gdf = gpd.GeoDataFrame(
@@ -732,13 +922,11 @@ def export_postal_polygons_geojson(postal_polygons, relation_ids,
 
 def find_postal_code(lon, lat, postal_polygons, prepared_cache):
     pt = Point(lon, lat)
-    # Passe 1 : covers (inclut les points sur la frontière)
     for pc, geom in postal_polygons.items():
         if pc not in prepared_cache:
             prepared_cache[pc] = prep(geom)
         if prepared_cache[pc].covers(pt):
             return pc
-    # Passe 2 : fallback sur le polygone le plus proche (cas limite de frontière)
     best_pc   = None
     best_dist = float('inf')
     for pc, geom in postal_polygons.items():
@@ -751,28 +939,28 @@ def find_postal_code(lon, lat, postal_polygons, prepared_cache):
     return None
 
 
-# ---------------------------------------------------------------------------
-# OSM pass 2 : adresses
-# ---------------------------------------------------------------------------
-
 class AddressCollector(osmium.SimpleHandler):
+    """
+    Collecte les adresses OSM (addr:housenumber + addr:street[_official]).
+
+    NB : le tag addr:postcode n'est plus utilisé ni reporté (le code postal
+    est toujours recalculé spatialement via boundary=postal_code).
+    """
+
     def __init__(self):
         super().__init__()
-        self.addresses     = []
-        self.with_postcode = []
-        self.multi_count   = 0  # nb d'adresses issues d'éclatement "24;30"
+        self.addresses   = []
+        self.multi_count = 0  # nb d'adresses issues d'un éclatement "24;30"
 
     def _process(self, osm_type, osm_id, tags, lat, lon):
         housenumber_raw = tags.get('addr:housenumber')
-        street      = tags.get('addr:street') or tags.get('addr:street_official')
+        street = tags.get('addr:street') or tags.get('addr:street_official')
         if not housenumber_raw or not street or lat is None or lon is None:
             return
-        postcode_tag = tags.get('addr:postcode', '').strip()
 
         # Convention OSM : addr:housenumber="24;30" représente UNE porte qui
-        # regroupe DEUX adresses postales (24 et 30). Idem "1068;1070;1072".
-        # On émet une entrée par numéro distinct, en conservant la trace
-        # de l'osm_id partagé pour pouvoir retrouver l'objet en cas d'anomalie.
+        # regroupe DEUX adresses postales (24 et 30). On émet une entrée par
+        # numéro distinct.
         housenumbers = [h.strip() for h in str(housenumber_raw).split(';') if h.strip()]
         if not housenumbers:
             return
@@ -780,17 +968,14 @@ class AddressCollector(osmium.SimpleHandler):
 
         for hn in housenumbers:
             entry = {
-                'osm_type':    osm_type,
-                'osm_id':      osm_id,
-                'street':      street,
-                'housenumber': hn,
+                'osm_type':        osm_type,
+                'osm_id':          osm_id,
+                'street':          street,
+                'housenumber':     hn,
                 'housenumber_raw': housenumber_raw if is_multi else None,
-                'lat':         lat,
-                'lon':         lon,
-                'postcode_tag': postcode_tag or None,
+                'lat':             lat,
+                'lon':             lon,
             }
-            if postcode_tag:
-                self.with_postcode.append(entry)
             self.addresses.append(entry)
             if is_multi:
                 self.multi_count += 1
@@ -810,12 +995,6 @@ class AddressCollector(osmium.SimpleHandler):
             if len(coords) < 2:
                 return
 
-            # Way fermée (premier == dernier nœud) → polygone (typiquement
-            # un bâtiment). On utilise le vrai centroïde géométrique, pas la
-            # moyenne arithmétique des nœuds (qui peut tomber très à côté pour
-            # un L, un U ou un polygone non-convexe).
-            # Way ouverte → on prend le centroïde de la LineString (point
-            # médian le long du tracé).
             geom = None
             if coords[0] == coords[-1] and len(coords) >= 4:
                 try:
@@ -832,7 +1011,6 @@ class AddressCollector(osmium.SimpleHandler):
             c = geom.centroid
             if c.is_empty:
                 return
-            # _process attend (lat, lon)
             self._process('way', w.id, w.tags, c.y, c.x)
         except Exception:
             pass
@@ -843,18 +1021,12 @@ def load_osm_addresses(pbf_path):
     h = AddressCollector()
     h.apply_file(pbf_path, locations=True)
     print(f'[OSM] {len(h.addresses)} adresses, '
-          f'{len(h.with_postcode)} avec addr:postcode (anomalie), '
           f'{h.multi_count} issues d\'un addr:housenumber multi (ex: "24;30")',
           flush=True)
-    return h.addresses, h.with_postcode
+    return h.addresses
 
 
-# ---------------------------------------------------------------------------
-# Rapport
-# ---------------------------------------------------------------------------
-
-def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
-                 outside_region, stats, best_date):
+def build_report(mismatches, no_postal_zone, stats, best_date):
     today = date.today().isoformat()
     L = []
     L.append('=' * 72)
@@ -877,24 +1049,9 @@ def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
     L.append(f'       multi ("24;30" → 24 + 30)')
     L.append(f'    └─ dans le buffer (hors région)    : {stats["outside_region"]:>6}')
     L.append(f'  Adresses OSM analysées (intra-RBC)   : {stats["total"]:>6}')
-    L.append(f'    Avec addr:postcode (anomalie)      : {stats["with_postcode_tag"]:>6}')
     L.append(f'    Hors zone boundary=postal_code OSM : {stats["no_postal_zone"]:>6}')
     L.append(f'    CP OSM ≠ CP BeSt (à vérifier)      : {stats["mismatches"]:>6}')
     L.append(f'    CP OSM = CP BeSt (OK)              : {stats["ok"]:>6}')
-    L.append('')
-
-    L.append('ANOMALIE : ADRESSES AVEC addr:postcode DIRECT')
-    L.append('(le tag addr:postcode ne devrait pas être utilisé à Bruxelles ;')
-    L.append(' le code postal est porté par la relation boundary=postal_code)')
-    L.append('-' * 40)
-    if anomalies_postcode_tag:
-        L.append(f'  {"OSM ref":<22} {"Rue":<33} {"N°":<8} {"addr:postcode"}')
-        L.append(f'  {"-"*20:<22} {"-"*31:<33} {"-"*6:<8} {"-"*12}')
-        for a in sorted(anomalies_postcode_tag, key=lambda x: x['street']):
-            ref = f'{a["osm_type"]}/{a["osm_id"]}'
-            L.append(f'  {ref:<22} {a["street"][:31]:<33} {a["housenumber"]:<8} {a["postcode_tag"]}')
-    else:
-        L.append('  (aucune)')
     L.append('')
 
     L.append('CP À VÉRIFIER : CP CALCULÉ OSM ≠ CP BeSt')
@@ -929,15 +1086,7 @@ def build_report(anomalies_postcode_tag, mismatches, no_postal_zone,
     return '\n'.join(L)
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-if __name__ == '__main__':
-    print(f'[START] {datetime.now().isoformat(timespec="seconds")} — '
-          f'compare-postal-codes.py', flush=True)
-    print(f'[START] Python {sys.version.split()[0]}, cwd={os.getcwd()}', flush=True)
-
+def run_postal_code_check(pbf_path):
     # 1. GPKG BeSt
     existing_gpkg = sorted(
         glob.glob('BeStBrussels_31370_GPKG_04000*.gpkg') +
@@ -956,40 +1105,34 @@ if __name__ == '__main__':
     else:
         latest_dt, latest_url = find_latest_best_gpkg_url()
         best_date = str(latest_dt)
-        zip_name  = os.path.basename(latest_url)
+        zip_name = os.path.basename(latest_url)
         if not os.path.isfile(zip_name):
             download(latest_url, zip_name)
         gpkg_path = extract_gpkg(zip_name)
 
-    # 2. PBF OSM
-    if not os.path.isfile(OSM_PBF_FILE):
-        download(OSM_PBF_URL, OSM_PBF_FILE)
-    else:
-        print(f'[INFO] PBF déjà présent : {OSM_PBF_FILE}')
-
-    # 3. Index spatial BeSt + whitelist dynamique des CP légitimes
+    # 2. Index spatial BeSt + whitelist dynamique des CP légitimes
     best_tree, best_lons, best_lats, best_norm_nbrs, best_postcodes, \
         brussels_postal_codes = load_best_spatial_index(gpkg_path)
 
-    # 4. Polygones postal_code OSM (bruts, avant filtrage région)
-    postal_polygons_raw, relation_ids = build_postal_polygons(OSM_PBF_FILE)
+    # 3. Polygones postal_code OSM (bruts, avant filtrage région)
+    postal_polygons_raw, relation_ids = build_postal_polygons(pbf_path)
 
-    # 5. Polygone officiel de la Région de Bruxelles-Capitale
+    # 4. Polygone officiel de la Région de Bruxelles-Capitale
     region_poly = fetch_region_polygon()
     region_prep = prep(region_poly)
 
-    # 6. Filtrer les polygones CP : whitelist (BeSt) + clip à la Région
+    # 5. Filtrer les polygones CP : whitelist (BeSt) + clip à la Région
     postal_polygons = filter_postal_polygons_to_region(
         postal_polygons_raw, region_poly, brussels_postal_codes)
 
-    # 6bis. Export GeoJSON debug (un par CP + combiné + polygone Région)
+    # 5bis. Export GeoJSON debug
     export_postal_polygons_geojson(postal_polygons, relation_ids,
                                    region_poly=region_poly)
 
-    # 7. Adresses OSM (toutes, y compris celles du buffer)
-    osm_addresses_all, anomalies_all = load_osm_addresses(OSM_PBF_FILE)
+    # 6. Adresses OSM (toutes, y compris celles du buffer)
+    osm_addresses_all = load_osm_addresses(pbf_path)
 
-    # 7bis. Ne garder que les adresses strictement dans la Région
+    # 6bis. Ne garder que les adresses strictement dans la Région
     print('[REGION] Filtrage des adresses (élimination du buffer du PBF)...',
           flush=True)
     osm_addresses  = []
@@ -999,23 +1142,21 @@ if __name__ == '__main__':
             osm_addresses.append(addr)
         else:
             outside_region.append(addr)
-    anomalies_postcode_tag = [a for a in anomalies_all
-                              if region_prep.covers(Point(a['lon'], a['lat']))]
     print(f'[REGION] {len(osm_addresses)}/{len(osm_addresses_all)} adresses '
           f'gardées ({len(outside_region)} dans le buffer)', flush=True)
 
-    # 8. Analyse
+    # 7. Analyse
     print('[ANALYSE] Calcul spatial et comparaison CP...', flush=True)
     prepared_cache = {}
     mismatches     = []
     no_postal_zone = []
-    not_in_best_count = 0  # compteur uniquement (log), pas exporté dans le rapport
+    not_in_best_count = 0
     ok_count       = 0
 
     for i, addr in enumerate(osm_addresses):
         if i % 10000 == 0:
             print(f'[ANALYSE]   {i}/{len(osm_addresses)}', flush=True)
-        cp_osm  = find_postal_code(addr['lon'], addr['lat'],
+        cp_osm = find_postal_code(addr['lon'], addr['lat'],
                                    postal_polygons, prepared_cache)
         norm_nbr = normalize(addr['housenumber'])
         cp_best = lookup_best_zipcode(
@@ -1041,7 +1182,6 @@ if __name__ == '__main__':
           f'(rue+numéro absent de BeSt — couvert par un autre rapport).',
           flush=True)
 
-    # Comptage des adresses issues d'un éclatement housenumber multi
     multi_count = sum(1 for a in osm_addresses_all if a.get('housenumber_raw'))
 
     stats = {
@@ -1051,17 +1191,14 @@ if __name__ == '__main__':
         'multi_housenumber': multi_count,
         'outside_region':    len(outside_region),
         'total':             len(osm_addresses),
-        'with_postcode_tag': len(anomalies_postcode_tag),
         'no_postal_zone':    len(no_postal_zone),
         'mismatches':        len(mismatches),
         'ok':                ok_count,
     }
 
     report = build_report(
-        anomalies_postcode_tag=anomalies_postcode_tag,
         mismatches=mismatches,
         no_postal_zone=no_postal_zone,
-        outside_region=outside_region,
         stats=stats,
         best_date=best_date,
     )
@@ -1071,3 +1208,29 @@ if __name__ == '__main__':
         f.write(report)
 
     print(f'\n[OK] Rapport écrit : {output_file}')
+
+
+# ===========================================================================
+# MAIN
+# ===========================================================================
+
+def main():
+    pbf_path = sys.argv[1] if len(sys.argv) > 1 else OSM_PBF_FILE
+
+    print(f'[START] {datetime.now().isoformat(timespec="seconds")}', flush=True)
+    print(f'[START] Python {sys.version.split()[0]}, cwd={os.getcwd()}', flush=True)
+
+    if not os.path.isfile(pbf_path):
+        download(OSM_PBF_URL, pbf_path)
+    else:
+        print(f'[INFO] PBF déjà présent : {pbf_path}')
+
+    print('\n========== PARTIE 1 : associatedStreet ==========\n', flush=True)
+    run_associated_streets_check(pbf_path)
+
+    print('\n========== PARTIE 2 : codes postaux ==========\n', flush=True)
+    run_postal_code_check(pbf_path)
+
+
+if __name__ == '__main__':
+    main()
