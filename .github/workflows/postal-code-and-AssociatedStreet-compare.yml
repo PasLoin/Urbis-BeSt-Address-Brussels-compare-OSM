@@ -1,4 +1,4 @@
-name: Postal Code Comparison (BeSt vs OSM)
+name: Postal Code Comparison (BeSt vs OSM) and AssociatedStreet check
 on:
   schedule:
     - cron: '15 15 15 * *'
