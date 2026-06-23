@@ -11,6 +11,153 @@
   <meta property="og:type" content="website">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css"/>
   <link rel="stylesheet" href="style.css"/>
+
+  <style>
+  /* ── Search control ─────────────────────────────────────────── */
+  #search-control {
+    position: absolute;
+    top: 54px;
+    left: 10px;
+    z-index: 1001;
+    font-family: sans-serif;
+  }
+  #search-bar {
+    display: flex;
+    align-items: center;
+    background: #fff;
+    border: 2px solid rgba(0,0,0,.2);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2);
+    overflow: hidden;
+    transition: width .2s ease;
+    width: 36px;
+    height: 36px;
+    white-space: nowrap;
+  }
+  #search-bar.expanded { width: 290px; }
+  #search-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #444;
+    flex-shrink: 0;
+    transition: background .12s;
+  }
+  #search-toggle:hover { background: #f0f0f0; }
+  #search-bar.expanded #search-toggle { border-right: 1px solid #ddd; }
+  #search-input {
+    flex: 1;
+    border: none;
+    outline: none;
+    font-size: 13px;
+    padding: 0 4px 0 8px;
+    height: 32px;
+    background: transparent;
+    color: #222;
+    min-width: 0;
+  }
+  #search-input::placeholder { color: #aaa; }
+  #search-clear {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #bbb;
+    font-size: 18px;
+    padding: 0 4px 0 2px;
+    height: 36px;
+    display: none;
+    align-items: center;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: color .12s;
+  }
+  #search-clear:hover { color: #555; }
+  #search-clear.visible { display: flex; }
+  /* Source toggle */
+  #search-src-pill {
+    display: none;
+    background: #f0f0f0;
+    border-radius: 5px;
+    margin: 0 6px 0 2px;
+    padding: 2px;
+    flex-shrink: 0;
+    gap: 1px;
+  }
+  #search-bar.expanded #search-src-pill { display: flex; }
+  .src-btn {
+    background: none;
+    border: none;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    cursor: pointer;
+    color: #888;
+    transition: background .12s, color .12s;
+    white-space: nowrap;
+  }
+  .src-btn.active {
+    background: #fff;
+    color: #222;
+    box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  }
+  /* Dropdown */
+  #search-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 270px;
+    max-width: 360px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.22);
+    list-style: none;
+    margin: 0;
+    padding: 4px 0;
+    max-height: 280px;
+    overflow-y: auto;
+    z-index: 1100;
+  }
+  #search-dropdown.open { display: block; }
+  #search-dropdown li {
+    padding: 7px 12px 6px;
+    cursor: pointer;
+    font-size: 12.5px;
+    line-height: 1.4;
+    border-bottom: 1px solid #f2f2f2;
+  }
+  #search-dropdown li:last-child { border-bottom: none; }
+  #search-dropdown li:hover,
+  #search-dropdown li.active { background: #e8f0fe; }
+  #search-dropdown li.status-row {
+    color: #999; cursor: default; font-style: italic; font-size: 12px;
+  }
+  #search-dropdown li.status-row:hover { background: none; }
+  #search-dropdown li.error-row {
+    color: #c0392b; cursor: default; font-size: 11.5px;
+  }
+  #search-dropdown li.error-row:hover { background: none; }
+  .sr-label { font-weight: 600; color: #1a1a1a; }
+  .sr-sub   { font-size: 11.5px; color: #777; margin-top: 1px; }
+  .sr-badge {
+    display: inline-block; font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .04em;
+    color: #fff; background: #4a90d9;
+    border-radius: 2px; padding: 0 3px;
+    margin-left: 5px; vertical-align: middle; opacity: .75;
+  }
+  .sr-badge.osm { background: #4caf50; }
+  .sr-hl { background: #fff176; border-radius: 2px; }
+  </style>
 </head>
 <body>
 <div id="map"></div>
@@ -32,6 +179,30 @@
   <br>
   <button id="lasso-export">Exporter .osm</button>
   <button id="lasso-cancel">Annuler</button>
+</div>
+
+<!-- ── Search widget ─────────────────────────────────────────────── -->
+<div id="search-control">
+  <div id="search-bar">
+    <button id="search-toggle" title="Rechercher une adresse" aria-label="Rechercher une adresse">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.5"
+           stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+    </button>
+    <input id="search-input" type="text"
+           placeholder="Rue… numéro optionnel"
+           autocomplete="off" spellcheck="false"
+           aria-label="Recherche d'adresse">
+    <button id="search-clear" title="Effacer" aria-label="Effacer">&times;</button>
+    <div id="search-src-pill">
+      <button class="src-btn active" data-src="osm">OSM</button>
+      <button class="src-btn"        data-src="urbis">UrbIS</button>
+    </div>
+  </div>
+  <ul id="search-dropdown" role="listbox"></ul>
 </div>
 
 <div id="copy-toast">ID copié !</div>
@@ -77,20 +248,15 @@
     .then(v => {
       document.getElementById('urbis-date').textContent = v.urbis_date;
       document.getElementById('osm-date').textContent = v.osm_date;
-
       if (v.stats && v.stats.total > 0 && v.stats.osm_loaded !== false) {
         const s = v.stats;
         const pctOk  = (s.ok / s.total * 100).toFixed(3);
         const pctMis = (s.missing / s.total * 100).toFixed(3);
         const pctVer = (s.verified_absent / s.total * 100).toFixed(3);
-
-        // Stacked progress bar (UrbIS coverage only)
         document.getElementById('stats-bar').innerHTML =
           `<span class="bar-seg" style="width:${pctOk}%;background:#2ecc71" title="Présentes : ${pctOk}%"></span>` +
           `<span class="bar-seg" style="width:${pctVer}%;background:#3498db" title="Vérifiées absentes : ${pctVer}%"></span>` +
           `<span class="bar-seg" style="width:${pctMis}%;background:#e74c3c" title="Manquantes : ${pctMis}%"></span>`;
-
-        // Detail rows
         const misUrbis = s.missing_in_urbis || 0;
         const misUrbisVer = s.missing_in_urbis_verified || 0;
         const misUrbisTotal = misUrbis + misUrbisVer;
@@ -116,25 +282,20 @@
     const m = String(raw).match(/(\d+)$/);
     return m ? m[1] : String(raw);
   }
-
   function inspireUrl(raw) {
     if (!raw) return null;
-    const id = extractInspireId(raw);
-    return `https://databrussels.be/id/address/${id}`;
+    return `https://databrussels.be/id/address/${extractInspireId(raw)}`;
   }
-
   function buildStreetTag(fr, nl) {
     const parts = [];
     if (fr) parts.push(fr);
     if (nl && nl !== fr) parts.push(nl);
     return parts.join(' - ');
   }
-
   function escapeXml(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
   }
-
   function generateOsmXml(features) {
     let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<osm version="0.6" generator="UrbIS-Sync">\n';
     features.forEach((f, i) => {
@@ -143,7 +304,7 @@
       const lat = f.lat || (f.geometry && f.geometry.coordinates[1]);
       const street = buildStreetTag(p.STRNAMEFRE, p.STRNAMEDUT);
       const id = extractInspireId(p.INSPIRE_ID);
-      xml += `  <node id="-${i + 1}" lat="${lat}" lon="${lng}" version="0" changeset="0">\n`;
+      xml += `  <node id="-${i+1}" lat="${lat}" lon="${lng}" version="0" changeset="0">\n`;
       if (p.POLICENUM) xml += `    <tag k="addr:housenumber" v="${escapeXml(p.POLICENUM)}"/>\n`;
       if (street)      xml += `    <tag k="addr:street" v="${escapeXml(street)}"/>\n`;
       if (id)          xml += `    <tag k="ref:databrussels" v="${escapeXml(id)}"/>\n`;
@@ -152,20 +313,14 @@
     xml += '</osm>\n';
     return xml;
   }
-
   function downloadOsmXml(features, filename) {
-    const xml = generateOsmXml(features);
-    const blob = new Blob([xml], { type: 'application/xml' });
+    const blob = new Blob([generateOsmXml(features)], { type: 'application/xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = filename || 'addresses.osm';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    a.href = url; a.download = filename || 'addresses.osm';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
   }
-
   function showToast(msg) {
     const t = document.getElementById('copy-toast');
     t.textContent = msg || 'ID copié !';
@@ -177,15 +332,14 @@
   // ─── Map ─────────────────────────────────────────
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol('pmtiles', protocol.tile);
-
   const p = new pmtiles.PMTiles('addresses.pmtiles.gz');
   protocol.add(p);
 
   const STATUS_COLOR = [
     'match', ['get', 'status'],
-    'ok',              '#2ecc71',
-    'verified_absent', '#3498db',
-    'missing_in_urbis','#ff7000',
+    'ok',                       '#2ecc71',
+    'verified_absent',          '#3498db',
+    'missing_in_urbis',         '#ff7000',
     'missing_in_urbis_verified','#ffc800',
     '#e74c3c'
   ];
@@ -234,61 +388,34 @@
   }
 
   map.on('load', () => {
-    map.addSource('addresses-source', {
-      type: 'vector',
-      url: 'pmtiles://addresses.pmtiles.gz'
-    });
-
+    map.addSource('addresses-source', { type: 'vector', url: 'pmtiles://addresses.pmtiles.gz' });
     map.addLayer({
-      id: 'addresses-points',
-      type: 'circle',
-      source: 'addresses-source',
-      'source-layer': 'addresses',
+      id: 'addresses-points', type: 'circle',
+      source: 'addresses-source', 'source-layer': 'addresses',
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 15, 4, 19, 8],
         'circle-color': STATUS_COLOR,
-        'circle-stroke-width': 1,
-        'circle-stroke-color': '#fff'
+        'circle-stroke-width': 1, 'circle-stroke-color': '#fff'
       }
     });
-
     applyFilters();
-
-    // Lasso polygon layer
-    map.addSource('lasso-source', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] }
-    });
-    map.addLayer({
-      id: 'lasso-fill',
-      type: 'fill',
-      source: 'lasso-source',
-      paint: { 'fill-color': '#3498db', 'fill-opacity': 0.15 }
-    });
-    map.addLayer({
-      id: 'lasso-line',
-      type: 'line',
-      source: 'lasso-source',
-      paint: { 'line-color': '#2980b9', 'line-width': 2, 'line-dasharray': [3, 2] }
-    });
+    map.addSource('lasso-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({ id: 'lasso-fill', type: 'fill', source: 'lasso-source', paint: { 'fill-color': '#3498db', 'fill-opacity': 0.15 } });
+    map.addLayer({ id: 'lasso-line', type: 'line', source: 'lasso-source', paint: { 'line-color': '#2980b9', 'line-width': 2, 'line-dasharray': [3, 2] } });
   });
 
   // ─── Popup on click ──────────────────────────────
   map.on('click', 'addresses-points', (e) => {
     if (lassoActive) return;
     const pr = e.features[0].properties;
-    const lng = e.lngLat.lng;
-    const lat = e.lngLat.lat;
-
+    const lng = e.lngLat.lng, lat = e.lngLat.lat;
     const numericId = extractInspireId(pr.INSPIRE_ID);
     const inspireHref = inspireUrl(pr.INSPIRE_ID);
     const hasInspire = !!pr.INSPIRE_ID;
-
     const mapillaryUrl = `https://www.mapillary.com/app/?lat=${lat}&lng=${lng}&z=18&focus=map&mapStyle=OpenStreetMap&panos=true`;
     const panoramaxUrl = `https://api.panoramax.xyz/?focus=map&map=18.12/${lat}/${lng}`;
     const bboxDelta = 0.0008;
     const josmUrl = `http://127.0.0.1:8111/load_and_zoom?left=${lng-bboxDelta}&right=${lng+bboxDelta}&top=${lat+bboxDelta}&bottom=${lat-bboxDelta}`;
-
     const statusLabels = {
       ok: '<span class="dot" style="background:#2ecc71"></span>Présente dans OSM',
       missing: '<span class="dot" style="background:#e74c3c"></span>Manquante dans OSM',
@@ -297,65 +424,35 @@
       missing_in_urbis_verified: '<span class="dot" style="background:#ffc800"></span>Absente d\'UrbIS (vérifiée)'
     };
     const label = statusLabels[pr.status] || pr.status;
-
     const uid = 'copy-' + Date.now();
-
     const inspireRow = hasInspire
-      ? `<div class="popup-meta-row">
-              <strong>INSPIRE :</strong>
-              <a href="${inspireHref}" target="_blank" rel="noopener noreferrer" class="inspire-link">${numericId}</a>
-              <button class="copy-id-btn" id="${uid}" title="Copier l'ID">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                copier
-              </button>
-            </div>`
-      : '';
-
-    const osmDlBtn = hasInspire
-      ? `<button class="osm-xml-btn" id="osm-dl-${uid}">⬇ .osm</button>`
-      : '';
-
-    const popup = new maplibregl.Popup()
+      ? `<div class="popup-meta-row"><strong>INSPIRE :</strong>
+           <a href="${inspireHref}" target="_blank" rel="noopener noreferrer" class="inspire-link">${numericId}</a>
+           <button class="copy-id-btn" id="${uid}" title="Copier l'ID">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+             copier
+           </button></div>` : '';
+    const osmDlBtn = hasInspire ? `<button class="osm-xml-btn" id="osm-dl-${uid}">⬇ .osm</button>` : '';
+    new maplibregl.Popup()
       .setLngLat(e.lngLat)
-      .setHTML(`
-        <div class="popup-content">
-          <div class="popup-title">
-            <strong>${pr.STRNAMEFRE || ''} ${pr.POLICENUM || ''}</strong><br>
-            <small>${pr.STRNAMEDUT || ''} ${pr.STRNAMEDUT ? (pr.POLICENUM || '') : ''}</small>
-          </div>
+      .setHTML(`<div class="popup-content">
+          <div class="popup-title"><strong>${pr.STRNAMEFRE || ''} ${pr.POLICENUM || ''}</strong><br>
+            <small>${pr.STRNAMEDUT || ''} ${pr.STRNAMEDUT ? (pr.POLICENUM || '') : ''}</small></div>
           <div class="popup-meta">
-            <div class="popup-meta-row"><strong>Status :</strong> ${label}</div>
-            ${inspireRow}
-          </div>
-          <div class="popup-footer">
-            ${pr.ZIPCODE || ''} ${pr.MUNNAMEFRE || ''}
-          </div>
+            <div class="popup-meta-row"><strong>Status :</strong> ${label}</div>${inspireRow}</div>
+          <div class="popup-footer">${pr.ZIPCODE || ''} ${pr.MUNNAMEFRE || ''}</div>
           <div class="popup-links">
             <a href="${mapillaryUrl}" target="_blank" rel="noopener noreferrer">Mapillary</a>
             <a href="${panoramaxUrl}" target="_blank" rel="noopener noreferrer">Panoramax</a>
             <a href="${josmUrl}" target="_blank" rel="noopener noreferrer">JOSM</a>
-            ${osmDlBtn}
-          </div>
-        </div>
-      `)
+            ${osmDlBtn}</div></div>`)
       .addTo(map);
-
     setTimeout(() => {
       if (hasInspire) {
-        const copyBtn = document.getElementById(uid);
-        if (copyBtn) {
-          copyBtn.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            navigator.clipboard.writeText(numericId).then(() => showToast('ID copié !'));
-          });
-        }
-        const dlBtn = document.getElementById('osm-dl-' + uid);
-        if (dlBtn) {
-          dlBtn.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            downloadOsmXml([{ properties: pr, lng, lat }], `address-${numericId}.osm`);
-          });
-        }
+        const cb = document.getElementById(uid);
+        if (cb) cb.addEventListener('click', ev => { ev.stopPropagation(); navigator.clipboard.writeText(numericId).then(() => showToast('ID copié !')); });
+        const dl = document.getElementById('osm-dl-' + uid);
+        if (dl) dl.addEventListener('click', ev => { ev.stopPropagation(); downloadOsmXml([{ properties: pr, lng, lat }], `address-${numericId}.osm`); });
       }
     }, 50);
   });
@@ -363,18 +460,15 @@
   map.on('mouseenter', 'addresses-points', () => { if (!lassoActive) map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', 'addresses-points', () => { if (!lassoActive) map.getCanvas().style.cursor = ''; });
 
-  // ─── Filter controls ────────────────────────────
+  // ─── Filter controls ─────────────────────────────
   document.getElementById('f-ok').addEventListener('change', e => { filters.ok = e.target.checked; applyFilters(); });
   document.getElementById('f-missing').addEventListener('change', e => { filters.missing = e.target.checked; applyFilters(); });
   document.getElementById('f-verified').addEventListener('change', e => { filters.verified_absent = e.target.checked; applyFilters(); });
   document.getElementById('f-missing-urbis').addEventListener('change', e => { filters.missing_in_urbis = e.target.checked; applyFilters(); });
   document.getElementById('f-missing-urbis-verified').addEventListener('change', e => { filters.missing_in_urbis_verified = e.target.checked; applyFilters(); });
 
-  // ─── Lasso tool ──────────────────────────────────
-  let lassoActive = false;
-  let lassoPoints = [];
-  let lassoSelectedFeatures = [];
-
+  // ─── Lasso ───────────────────────────────────────
+  let lassoActive = false, lassoPoints = [], lassoSelectedFeatures = [];
   const lassoBtn = document.getElementById('lasso-btn');
   const lassoPanel = document.getElementById('lasso-panel');
   const lassoCountEl = document.getElementById('lasso-count');
@@ -383,140 +477,468 @@
     lassoActive = !lassoActive;
     lassoBtn.classList.toggle('active', lassoActive);
     if (lassoActive) {
-      lassoPoints = [];
-      lassoSelectedFeatures = [];
+      lassoPoints = []; lassoSelectedFeatures = [];
       map.getCanvas().style.cursor = 'crosshair';
       map.dragPan.disable();
       updateLassoPolygon();
       lassoPanel.style.display = 'none';
     } else {
-      map.getCanvas().style.cursor = '';
-      map.dragPan.enable();
-      lassoPoints = [];
-      updateLassoPolygon();
-      lassoPanel.style.display = 'none';
+      map.getCanvas().style.cursor = ''; map.dragPan.enable();
+      lassoPoints = []; updateLassoPolygon(); lassoPanel.style.display = 'none';
     }
   }
-
   function updateLassoPolygon() {
-    const source = map.getSource('lasso-source');
-    if (!source) return;
-    if (lassoPoints.length < 2) {
-      source.setData({ type: 'FeatureCollection', features: [] });
-      return;
-    }
-    const coords = [...lassoPoints.map(p => [p.lng, p.lat])];
+    const src = map.getSource('lasso-source');
+    if (!src) return;
+    if (lassoPoints.length < 2) { src.setData({ type: 'FeatureCollection', features: [] }); return; }
+    const coords = lassoPoints.map(p => [p.lng, p.lat]);
     if (lassoPoints.length >= 3) {
-      coords.push(coords[0]);
-      source.setData({
-        type: 'FeatureCollection',
-        features: [{
-          type: 'Feature',
-          geometry: { type: 'Polygon', coordinates: [coords] }
-        }]
-      });
+      src.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[...coords, coords[0]]] } }] });
     } else {
-      source.setData({
-        type: 'FeatureCollection',
-        features: [{
-          type: 'Feature',
-          geometry: { type: 'LineString', coordinates: coords }
-        }]
-      });
+      src.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } }] });
     }
   }
-
   function pointInPolygon(point, polygon) {
     let inside = false;
     const x = point[0], y = point[1];
     for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      const xi = polygon[i][0], yi = polygon[i][1];
-      const xj = polygon[j][0], yj = polygon[j][1];
-      const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-      if (intersect) inside = !inside;
+      const xi = polygon[i][0], yi = polygon[i][1], xj = polygon[j][0], yj = polygon[j][1];
+      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
     }
     return inside;
   }
-
   const NON_EXPORTABLE = new Set(['missing_in_urbis', 'missing_in_urbis_verified']);
-
   function finishLasso() {
     if (lassoPoints.length < 3) return;
-
     const polyCoords = lassoPoints.map(p => [p.lng, p.lat]);
     const features = map.queryRenderedFeatures({ layers: ['addresses-points'] });
-
-    const seen = new Set();
-    lassoSelectedFeatures = [];
-
+    const seen = new Set(); lassoSelectedFeatures = [];
     for (const f of features) {
       if (NON_EXPORTABLE.has(f.properties.status)) continue;
       const coords = f.geometry.coordinates;
       const key = `${coords[0]},${coords[1]}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (pointInPolygon(coords, polyCoords)) {
-        lassoSelectedFeatures.push({
-          properties: f.properties,
-          lng: coords[0],
-          lat: coords[1],
-          geometry: f.geometry
-        });
-      }
+      if (seen.has(key)) continue; seen.add(key);
+      if (pointInPolygon(coords, polyCoords)) lassoSelectedFeatures.push({ properties: f.properties, lng: coords[0], lat: coords[1], geometry: f.geometry });
     }
-
     lassoCountEl.textContent = lassoSelectedFeatures.length;
     lassoPanel.style.display = 'block';
-
-    lassoActive = false;
-    lassoBtn.classList.remove('active');
-    map.getCanvas().style.cursor = '';
-    map.dragPan.enable();
+    lassoActive = false; lassoBtn.classList.remove('active');
+    map.getCanvas().style.cursor = ''; map.dragPan.enable();
   }
-
   lassoBtn.addEventListener('click', toggleLasso);
-
-  map.on('click', (e) => {
-    if (!lassoActive) return;
-    lassoPoints.push(e.lngLat);
-    updateLassoPolygon();
-  });
-
-  map.on('dblclick', (e) => {
-    if (!lassoActive) return;
-    e.preventDefault();
-    finishLasso();
-  });
-
-  map.on('contextmenu', (e) => {
-    if (!lassoActive) return;
-    e.preventDefault();
-    finishLasso();
-  });
-
-  document.getElementById('lasso-export').addEventListener('click', () => {
-    if (lassoSelectedFeatures.length === 0) return;
-    downloadOsmXml(lassoSelectedFeatures, 'addresses-selection.osm');
-  });
-
-  document.getElementById('lasso-cancel').addEventListener('click', () => {
-    lassoPoints = [];
-    lassoSelectedFeatures = [];
-    updateLassoPolygon();
-    lassoPanel.style.display = 'none';
-  });
-
-  document.addEventListener('keydown', (e) => {
+  map.on('click', e => { if (!lassoActive) return; lassoPoints.push(e.lngLat); updateLassoPolygon(); });
+  map.on('dblclick', e => { if (!lassoActive) return; e.preventDefault(); finishLasso(); });
+  map.on('contextmenu', e => { if (!lassoActive) return; e.preventDefault(); finishLasso(); });
+  document.getElementById('lasso-export').addEventListener('click', () => { if (lassoSelectedFeatures.length) downloadOsmXml(lassoSelectedFeatures, 'addresses-selection.osm'); });
+  document.getElementById('lasso-cancel').addEventListener('click', () => { lassoPoints = []; lassoSelectedFeatures = []; updateLassoPolygon(); lassoPanel.style.display = 'none'; });
+  document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       if (lassoActive) toggleLasso();
-      else {
-        lassoPoints = [];
-        lassoSelectedFeatures = [];
-        updateLassoPolygon();
-        lassoPanel.style.display = 'none';
-      }
+      else { lassoPoints = []; lassoSelectedFeatures = []; updateLassoPolygon(); lassoPanel.style.display = 'none'; }
     }
   });
+
+  // ═══════════════════════════════════════════════════════════════
+  // SEARCH WIDGET
+  // ═══════════════════════════════════════════════════════════════
+
+  const URBIS_BASE  = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
+  const SEARCH_MAX  = 7;
+  const SEARCH_ZOOM = 18;
+  const PROJ_L72    = '+proj=lcc +lat_1=51.16666723333333 +lat_2=49.8333339 '
+                    + '+lat_0=90 +lon_0=4.367486666666666 +x_0=150000.013 '
+                    + '+y_0=5400088.438 +ellps=intl '
+                    + '+towgs84=-106.869,52.2978,-103.724,0.3366,-0.457,1.8422,-1.2747 '
+                    + '+units=m +no_defs';
+
+  let _searchSource = 'osm';
+  let _searchIdx    = null;
+  let _idxLoading   = false;
+  let _idxCallbacks = [];
+  let _searchMarker = null;
+  let _debounceT    = null;
+  let _activeItem   = -1;
+  let _currentItems = [];
+
+  const srBar      = document.getElementById('search-bar');
+  const srToggle   = document.getElementById('search-toggle');
+  const srInput    = document.getElementById('search-input');
+  const srClear    = document.getElementById('search-clear');
+  const srDropdown = document.getElementById('search-dropdown');
+
+  // ── Utilitaires ────────────────────────────────────────────────
+  function srNorm(s) {
+    if (!s) return '';
+    return s.toLowerCase().trim()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ');
+  }
+  function srEsc(s) {
+    return (s||'').replace(/[&<>"']/g,
+      c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function srHL(text, query) {
+    if (!text || !query) return srEsc(text);
+    const re = new RegExp(query.trim().replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'gi');
+    return srEsc(text).replace(re, m => `<span class="sr-hl">${srEsc(m)}</span>`);
+  }
+  function srFuzzy(query, text) {
+    const q = srNorm(query), t = srNorm(text);
+    if (!q||!t) return 0;
+    if (t === q)          return 100;
+    if (t.startsWith(q)) return 90;
+    if (t.includes(q))   return 70;
+    const qw = q.split(' ');
+    const hits = qw.filter(w => w.length > 1 && t.includes(w)).length;
+    if (hits === qw.length) return 60;
+    return hits > 0 ? 35 + (hits / qw.length) * 20 : 0;
+  }
+
+  // ── Proj4 lazy-load ────────────────────────────────────────────
+  let _proj4Promise = null;
+  function ensureProj4() {
+    if (!_proj4Promise) {
+      _proj4Promise = new Promise((ok, fail) => {
+        if (window.proj4) { ok(); return; }
+        const s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.min.js';
+        s.onload = ok; s.onerror = () => fail(new Error('proj4.js indisponible'));
+        document.head.appendChild(s);
+      });
+    }
+    return _proj4Promise;
+  }
+  async function lambertToLngLat(x, y) {
+    await ensureProj4();
+    if (!proj4.defs('EPSG:31370')) proj4.defs('EPSG:31370', PROJ_L72);
+    const [lon, lat] = proj4('EPSG:31370', 'WGS84', [+x, +y]);
+    return [lon, lat];
+  }
+
+  // ── Index OSM ──────────────────────────────────────────────────
+  function loadIndex() {
+    return new Promise((ok, fail) => {
+      if (_searchIdx) { ok(_searchIdx); return; }
+      _idxCallbacks.push({ ok, fail });
+      if (_idxLoading) return;
+      _idxLoading = true;
+      fetch('search-index.json')
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then(data => { _searchIdx = data; _idxCallbacks.forEach(cb => cb.ok(data)); _idxCallbacks = []; })
+        .catch(err => { _idxLoading = false; _idxCallbacks.forEach(cb => cb.fail(err)); _idxCallbacks = []; });
+    });
+  }
+
+  // ── Recherche OSM locale ───────────────────────────────────────
+  // Pas de coupure prématurée : on collecte UNE coordonnée par rue
+  // candidate dans l'ordre du score — "Rue Royale" (score 90) avant
+  // "Rue du Musée" (score 45) quoi qu'il arrive dans le JSON.
+  function searchLocal(query, maxR) {
+    const { s: streets, sn: streetNorms, a: addresses } = _searchIdx;
+    const m = query.match(/^(.*?)\s+(\d[\d\w]?)$/);
+    const streetQuery = m ? m[1] : query;
+    const numFilter   = m ? m[2].toLowerCase() : null;
+    const qNorm = srNorm(streetQuery);
+
+    const candidates = streetNorms
+      .map((sn, i) => ({ i, score: srFuzzy(qNorm, sn) }))
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, numFilter ? 20 : maxR + 5);
+
+    if (!candidates.length) return [];
+    const scoreMap = new Map(candidates.map(x => [x.i, x.score]));
+
+    if (!numFilter) {
+      const streetCoords = new Map();
+      for (const [sid, , lat, lon] of addresses) {
+        if (scoreMap.has(sid) && !streetCoords.has(sid)) {
+          streetCoords.set(sid, [lon, lat]);
+          if (streetCoords.size === candidates.length) break;
+        }
+      }
+      return candidates
+        .filter(c => streetCoords.has(c.i))
+        .slice(0, maxR)
+        .map(c => ({
+          label:  streets[c.i],
+          sub:    '',
+          lngLat: streetCoords.get(c.i),
+          score:  c.score,
+          source: 'osm',
+        }));
+    } else {
+      const results = [], seen = new Set();
+      for (const [sid, num, lat, lon] of addresses) {
+        if (!scoreMap.has(sid)) continue;
+        if (!num.toLowerCase().startsWith(numFilter)) continue;
+        const key = `${sid}_${num}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push({
+          label:  `${streets[sid]} ${num}`,
+          sub:    '',
+          lngLat: [lon, lat],
+          score:  scoreMap.get(sid) + (num.toLowerCase() === numFilter ? 10 : 0),
+          source: 'osm',
+        });
+      }
+      return results.sort((a, b) => b.score - a.score).slice(0, maxR);
+    }
+  }
+
+  // ── UrbIS API ──────────────────────────────────────────────────
+  // Structure réelle de la réponse (vérifiée sur l'API) :
+  // { resultsList: [{ result: [{ score, address?, streetname?, municipality? }] }] }
+  //
+  // Position : position.pointGeometry.point.pos = "149556.559 170779.749" (string)
+  // Street   : hasStreetName.streetname.name[{language,spelling}]
+  // Mun      : hasMunicipality.name[{language,spelling}]
+  // CP       : hasPostalInfo.code.objectIdentifier
+
+  function _getName(arr) {
+    if (!Array.isArray(arr)) return '';
+    return (arr.find(n => n.language === 'fr') || arr[0] || {}).spelling || '';
+  }
+
+  function _parsePos(obj) {
+    // "pos" est une string espace-séparée : "149556.559 170779.749"
+    const posStr = obj?.position?.pointGeometry?.point?.pos;
+    if (typeof posStr === 'string') {
+      const parts = posStr.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const x = parseFloat(parts[0]), y = parseFloat(parts[1]);
+        if (!isNaN(x) && !isNaN(y)) return { x, y };
+      }
+    }
+    // Fallback : tableau de valeurs (format swagger schema)
+    if (Array.isArray(posStr) && posStr.length >= 2)
+      return { x: parseFloat(posStr[0]), y: parseFloat(posStr[1]) };
+    return null;
+  }
+
+  async function searchUrbis(query, maxR) {
+    const m = query.match(/^(.*?)\s+(\d[\d\w]?)$/);
+    const streetPart = (m ? m[1] : query).trim();
+    const numPart    = m ? m[2] : null;
+
+    let url;
+    if (numPart) {
+      url = new URL(`${URBIS_BASE}/searchAddress`);
+      url.searchParams.set('searchLanguage', 'fr');
+      url.searchParams.set('streetName',   streetPart);
+      url.searchParams.set('policeNumber', numPart);
+      url.searchParams.set('model',        'BeStPlus');
+    } else {
+      url = new URL(`${URBIS_BASE}/searchStreetName`);
+      url.searchParams.set('searchLanguage', 'fr');
+      url.searchParams.set('streetName',     streetPart);
+      url.searchParams.set('model',          'BeStPlus');
+    }
+
+    let resp;
+    try {
+      resp = await fetch(url, { headers: { Accept: 'application/json' } });
+    } catch (netErr) {
+      throw new Error(`Réseau : ${netErr.message}`);
+    }
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new Error(`UrbIS HTTP ${resp.status} \u2014 ${body.slice(0, 80)}`);
+    }
+
+    const data = await resp.json();
+
+    const results = [];
+
+    // Parcourir resultsList[n].result[m]
+    for (const group of (data.resultsList || [])) {
+      for (const item of (group.result || [])) {
+
+        let label = '', sub = '', pos = null;
+
+        if (item.address) {
+          // ── Adresse (searchAddress) ──────────────────────────────
+          const addr = item.address;
+          const sn   = addr.hasStreetName?.streetname;
+          label = _getName(sn?.name);
+          const hn  = addr.houseNumber || '';
+          if (hn) label = `${label} ${hn}`.trim();
+          const mun = _getName(addr.hasMunicipality?.name);
+          const pc  = addr.hasPostalInfo?.code?.objectIdentifier || '';
+          sub = [mun, pc].filter(Boolean).join(' \u00b7 ');
+          pos = _parsePos(addr);
+
+        } else if (item.streetname) {
+          // ── Rue (searchStreetName) ───────────────────────────────
+          const sn  = item.streetname;
+          label = _getName(sn?.name);
+          const mun = _getName(item.municipality?.name);
+          sub = mun || '';
+          pos = _parsePos(sn) || _parsePos(item);
+
+        } else if (item.municipality) {
+          // ── Commune ──────────────────────────────────────────────
+          label = _getName(item.municipality.name);
+          pos   = _parsePos(item.municipality);
+
+        } else { continue; }
+
+        if (!label || !pos) continue;
+        try {
+          const lngLat = await lambertToLngLat(pos.x, pos.y);
+          results.push({ label, sub, lngLat, score: srFuzzy(query, label), source: 'urbis' });
+        } catch (_) {}
+      }
+    }
+
+    return results.sort((a, b) => b.score - a.score).slice(0, maxR);
+  }
+
+  // ── Dropdown ──────────────────────────────────────────────────
+  function srShowStatus(msg, isError = false) {
+    _currentItems = [];
+    srDropdown.innerHTML = `<li class="${isError ? 'error-row' : 'status-row'}">${srEsc(msg)}</li>`;
+    srDropdown.classList.add('open');
+  }
+  function srRender(items, query) {
+    _currentItems = items; _activeItem = -1;
+    srDropdown.innerHTML = '';
+    items.forEach((r, i) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      const badge = r.source === 'osm'
+        ? '<span class="sr-badge osm">OSM</span>'
+        : '<span class="sr-badge">UrbIS</span>';
+      li.innerHTML = `<div class="sr-label">${srHL(r.label, query)}${badge}</div>`
+        + (r.sub ? `<div class="sr-sub">${srEsc(r.sub)}</div>` : '');
+      li.addEventListener('click', () => srSelect(r));
+      li.addEventListener('mouseenter', () => {
+        _activeItem = i;
+        srDropdown.querySelectorAll('li').forEach((el, j) => el.classList.toggle('active', j === i));
+      });
+      srDropdown.appendChild(li);
+    });
+    srDropdown.classList.add('open');
+  }
+  function srHide() { srDropdown.classList.remove('open'); _activeItem = -1; }
+  function srMoveActive(dir) {
+    const lis = srDropdown.querySelectorAll('li:not(.status-row):not(.error-row)');
+    if (!lis.length) return;
+    _activeItem = Math.max(0, Math.min(lis.length - 1, _activeItem + dir));
+    lis.forEach((li, i) => li.classList.toggle('active', i === _activeItem));
+    lis[_activeItem]?.scrollIntoView({ block: 'nearest' });
+  }
+
+  // ── Sélection ─────────────────────────────────────────────────
+  function srSelect(result) {
+    srInput.value = result.label;
+    srClear.classList.add('visible');
+    srHide();
+    const [lon, lat] = result.lngLat;
+    if (_searchMarker) { _searchMarker.remove(); _searchMarker = null; }
+    _searchMarker = new maplibregl.Marker({ color: '#e74c3c' })
+      .setLngLat([lon, lat])
+      .setPopup(new maplibregl.Popup({ offset: 28, maxWidth: '240px' })
+        .setHTML(`<strong>${srEsc(result.label)}</strong>`
+          + (result.sub ? `<br><span style="font-size:11px;color:#666">${srEsc(result.sub)}</span>` : '')))
+      .addTo(map).togglePopup();
+    map.flyTo({ center: [lon, lat], zoom: SEARCH_ZOOM, duration: 600 });
+  }
+
+  // ── Dispatch ──────────────────────────────────────────────────
+  async function srSearch(query) {
+    srShowStatus('Recherche\u2026');
+    try {
+      let results = [];
+      if (_searchSource === 'osm') {
+        await loadIndex();
+        results = searchLocal(query, SEARCH_MAX);
+        if (!results.length) srShowStatus('Aucun r\u00e9sultat dans OSM');
+        else srRender(results, query);
+      } else {
+        results = await searchUrbis(query, SEARCH_MAX);
+        if (!results.length) srShowStatus('Aucun r\u00e9sultat UrbIS');
+        else srRender(results, query);
+      }
+    } catch (e) {
+      console.error('[Search]', e);
+      srShowStatus(e.message || 'Erreur', true);
+    }
+  }
+
+  // ── Événements ────────────────────────────────────────────────
+  srToggle.addEventListener('click', () => {
+    const expanded = srBar.classList.toggle('expanded');
+    if (expanded) {
+      srInput.focus();
+    } else {
+      srInput.value = ''; srClear.classList.remove('visible'); srHide();
+      if (_searchMarker) { _searchMarker.remove(); _searchMarker = null; }
+    }
+  });
+
+  srInput.addEventListener('input', () => {
+    const q = srInput.value.trim();
+    srClear.classList.toggle('visible', q.length > 0);
+    _activeItem = -1;
+    srHide();
+    if (_searchSource === 'osm') {
+      if (q.length < 3) return;
+      clearTimeout(_debounceT);
+      _debounceT = setTimeout(() => srSearch(q), 320);
+    } else {
+      if (q.length >= 3) srShowStatus('\u21b5  Appuyez sur Entr\u00e9e pour rechercher');
+    }
+  });
+
+  srInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (srDropdown.classList.contains('open')) { srHide(); }
+      else { srBar.classList.remove('expanded'); srInput.value = ''; srClear.classList.remove('visible'); }
+      return;
+    }
+    if (e.key === 'Enter') {
+      if (srDropdown.classList.contains('open') && _activeItem >= 0 && _currentItems[_activeItem]) {
+        e.preventDefault(); srSelect(_currentItems[_activeItem]);
+      } else if (_searchSource === 'urbis') {
+        const q = srInput.value.trim();
+        if (q.length >= 3) { e.preventDefault(); srSearch(q); }
+      }
+      return;
+    }
+    if (!srDropdown.classList.contains('open')) return;
+    if (e.key === 'ArrowDown')    { e.preventDefault(); srMoveActive(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); srMoveActive(-1); }
+    else if (e.key === 'Tab') {
+      if (_activeItem >= 0 && _currentItems[_activeItem]) { e.preventDefault(); srSelect(_currentItems[_activeItem]); }
+    }
+  });
+
+  srClear.addEventListener('click', () => {
+    srInput.value = ''; srClear.classList.remove('visible'); srHide();
+    if (_searchMarker) { _searchMarker.remove(); _searchMarker = null; }
+    srInput.focus();
+  });
+
+  document.querySelectorAll('.src-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _searchSource = btn.dataset.src;
+      document.querySelectorAll('.src-btn').forEach(b => b.classList.toggle('active', b === btn));
+      srHide();
+      const q = srInput.value.trim();
+      if (_searchSource === 'osm' && q.length >= 3) {
+        srSearch(q);
+      } else if (_searchSource === 'urbis' && q.length >= 3) {
+        srShowStatus('\u21b5  Appuyez sur Entr\u00e9e pour rechercher');
+      }
+      if (_searchSource === 'osm') loadIndex().catch(() => {});
+    });
+  });
+
+  map.on('click', () => { if (!lassoActive) srHide(); });
+  srToggle.addEventListener('mouseenter', () => loadIndex().catch(() => {}), { once: true });
+
 </script>
 </body>
 </html>
