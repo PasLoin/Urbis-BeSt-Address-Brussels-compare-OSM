@@ -21,7 +21,6 @@
     z-index: 1001;
     font-family: sans-serif;
   }
-
   #search-bar {
     display: flex;
     align-items: center;
@@ -36,7 +35,6 @@
     white-space: nowrap;
   }
   #search-bar.expanded { width: 290px; }
-
   #search-toggle {
     background: none;
     border: none;
@@ -54,7 +52,6 @@
   }
   #search-toggle:hover { background: #f0f0f0; }
   #search-bar.expanded #search-toggle { border-right: 1px solid #ddd; }
-
   #search-input {
     flex: 1;
     border: none;
@@ -67,7 +64,6 @@
     min-width: 0;
   }
   #search-input::placeholder { color: #aaa; }
-
   #search-clear {
     background: none;
     border: none;
@@ -84,8 +80,7 @@
   }
   #search-clear:hover { color: #555; }
   #search-clear.visible { display: flex; }
-
-  /* ── Source toggle OSM / UrbIS ──────────────────────────────── */
+  /* Source toggle */
   #search-src-pill {
     display: none;
     background: #f0f0f0;
@@ -96,7 +91,6 @@
     gap: 1px;
   }
   #search-bar.expanded #search-src-pill { display: flex; }
-
   .src-btn {
     background: none;
     border: none;
@@ -115,8 +109,7 @@
     color: #222;
     box-shadow: 0 1px 3px rgba(0,0,0,.18);
   }
-
-  /* ── Dropdown ───────────────────────────────────────────────── */
+  /* Dropdown */
   #search-dropdown {
     display: none;
     position: absolute;
@@ -135,7 +128,6 @@
     z-index: 1100;
   }
   #search-dropdown.open { display: block; }
-
   #search-dropdown li {
     padding: 7px 12px 6px;
     cursor: pointer;
@@ -147,18 +139,17 @@
   #search-dropdown li:hover,
   #search-dropdown li.active { background: #e8f0fe; }
   #search-dropdown li.status-row {
-    color: #999;
-    cursor: default;
-    font-style: italic;
-    font-size: 12px;
+    color: #999; cursor: default; font-style: italic; font-size: 12px;
   }
   #search-dropdown li.status-row:hover { background: none; }
-
+  #search-dropdown li.error-row {
+    color: #c0392b; cursor: default; font-size: 11.5px;
+  }
+  #search-dropdown li.error-row:hover { background: none; }
   .sr-label { font-weight: 600; color: #1a1a1a; }
   .sr-sub   { font-size: 11.5px; color: #777; margin-top: 1px; }
   .sr-badge {
-    display: inline-block;
-    font-size: 9px; font-weight: 700;
+    display: inline-block; font-size: 9px; font-weight: 700;
     text-transform: uppercase; letter-spacing: .04em;
     color: #fff; background: #4a90d9;
     border-radius: 2px; padding: 0 3px;
@@ -213,7 +204,6 @@
   </div>
   <ul id="search-dropdown" role="listbox"></ul>
 </div>
-<!-- ── /Search widget ────────────────────────────────────────────── -->
 
 <div id="copy-toast">ID copié !</div>
 
@@ -258,18 +248,15 @@
     .then(v => {
       document.getElementById('urbis-date').textContent = v.urbis_date;
       document.getElementById('osm-date').textContent = v.osm_date;
-
       if (v.stats && v.stats.total > 0 && v.stats.osm_loaded !== false) {
         const s = v.stats;
         const pctOk  = (s.ok / s.total * 100).toFixed(3);
         const pctMis = (s.missing / s.total * 100).toFixed(3);
         const pctVer = (s.verified_absent / s.total * 100).toFixed(3);
-
         document.getElementById('stats-bar').innerHTML =
           `<span class="bar-seg" style="width:${pctOk}%;background:#2ecc71" title="Présentes : ${pctOk}%"></span>` +
           `<span class="bar-seg" style="width:${pctVer}%;background:#3498db" title="Vérifiées absentes : ${pctVer}%"></span>` +
           `<span class="bar-seg" style="width:${pctMis}%;background:#e74c3c" title="Manquantes : ${pctMis}%"></span>`;
-
         const misUrbis = s.missing_in_urbis || 0;
         const misUrbisVer = s.missing_in_urbis_verified || 0;
         const misUrbisTotal = misUrbis + misUrbisVer;
@@ -401,24 +388,17 @@
   }
 
   map.on('load', () => {
-    map.addSource('addresses-source', {
-      type: 'vector',
-      url: 'pmtiles://addresses.pmtiles.gz'
-    });
+    map.addSource('addresses-source', { type: 'vector', url: 'pmtiles://addresses.pmtiles.gz' });
     map.addLayer({
-      id: 'addresses-points',
-      type: 'circle',
-      source: 'addresses-source',
-      'source-layer': 'addresses',
+      id: 'addresses-points', type: 'circle',
+      source: 'addresses-source', 'source-layer': 'addresses',
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 15, 4, 19, 8],
         'circle-color': STATUS_COLOR,
-        'circle-stroke-width': 1,
-        'circle-stroke-color': '#fff'
+        'circle-stroke-width': 1, 'circle-stroke-color': '#fff'
       }
     });
     applyFilters();
-
     map.addSource('lasso-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({ id: 'lasso-fill', type: 'fill', source: 'lasso-source', paint: { 'fill-color': '#3498db', 'fill-opacity': 0.15 } });
     map.addLayer({ id: 'lasso-line', type: 'line', source: 'lasso-source', paint: { 'line-color': '#2980b9', 'line-width': 2, 'line-dasharray': [3, 2] } });
@@ -487,7 +467,7 @@
   document.getElementById('f-missing-urbis').addEventListener('change', e => { filters.missing_in_urbis = e.target.checked; applyFilters(); });
   document.getElementById('f-missing-urbis-verified').addEventListener('change', e => { filters.missing_in_urbis_verified = e.target.checked; applyFilters(); });
 
-  // ─── Lasso tool ──────────────────────────────────
+  // ─── Lasso ───────────────────────────────────────
   let lassoActive = false, lassoPoints = [], lassoSelectedFeatures = [];
   const lassoBtn = document.getElementById('lasso-btn');
   const lassoPanel = document.getElementById('lasso-panel');
@@ -503,26 +483,21 @@
       updateLassoPolygon();
       lassoPanel.style.display = 'none';
     } else {
-      map.getCanvas().style.cursor = '';
-      map.dragPan.enable();
-      lassoPoints = [];
-      updateLassoPolygon();
-      lassoPanel.style.display = 'none';
+      map.getCanvas().style.cursor = ''; map.dragPan.enable();
+      lassoPoints = []; updateLassoPolygon(); lassoPanel.style.display = 'none';
     }
   }
-
   function updateLassoPolygon() {
-    const source = map.getSource('lasso-source');
-    if (!source) return;
-    if (lassoPoints.length < 2) { source.setData({ type: 'FeatureCollection', features: [] }); return; }
+    const src = map.getSource('lasso-source');
+    if (!src) return;
+    if (lassoPoints.length < 2) { src.setData({ type: 'FeatureCollection', features: [] }); return; }
     const coords = lassoPoints.map(p => [p.lng, p.lat]);
     if (lassoPoints.length >= 3) {
-      source.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[...coords, coords[0]]] } }] });
+      src.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [[...coords, coords[0]]] } }] });
     } else {
-      source.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } }] });
+      src.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } }] });
     }
   }
-
   function pointInPolygon(point, polygon) {
     let inside = false;
     const x = point[0], y = point[1];
@@ -532,31 +507,24 @@
     }
     return inside;
   }
-
   const NON_EXPORTABLE = new Set(['missing_in_urbis', 'missing_in_urbis_verified']);
-
   function finishLasso() {
     if (lassoPoints.length < 3) return;
     const polyCoords = lassoPoints.map(p => [p.lng, p.lat]);
     const features = map.queryRenderedFeatures({ layers: ['addresses-points'] });
-    const seen = new Set();
-    lassoSelectedFeatures = [];
+    const seen = new Set(); lassoSelectedFeatures = [];
     for (const f of features) {
       if (NON_EXPORTABLE.has(f.properties.status)) continue;
       const coords = f.geometry.coordinates;
       const key = `${coords[0]},${coords[1]}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (seen.has(key)) continue; seen.add(key);
       if (pointInPolygon(coords, polyCoords)) lassoSelectedFeatures.push({ properties: f.properties, lng: coords[0], lat: coords[1], geometry: f.geometry });
     }
     lassoCountEl.textContent = lassoSelectedFeatures.length;
     lassoPanel.style.display = 'block';
-    lassoActive = false;
-    lassoBtn.classList.remove('active');
-    map.getCanvas().style.cursor = '';
-    map.dragPan.enable();
+    lassoActive = false; lassoBtn.classList.remove('active');
+    map.getCanvas().style.cursor = ''; map.dragPan.enable();
   }
-
   lassoBtn.addEventListener('click', toggleLasso);
   map.on('click', e => { if (!lassoActive) return; lassoPoints.push(e.lngLat); updateLassoPolygon(); });
   map.on('dblclick', e => { if (!lassoActive) return; e.preventDefault(); finishLasso(); });
@@ -574,18 +542,16 @@
   // SEARCH WIDGET
   // ═══════════════════════════════════════════════════════════════
 
-  const SEARCH_INDEX_URL  = 'search-index.json';
-  const URBIS_FREE_SEARCH = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding/freeSearch/searchAnyObject';
+  const URBIS_BASE  = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
   const SEARCH_MAX  = 7;
   const SEARCH_ZOOM = 18;
-  const PROJ_L72 = '+proj=lcc +lat_1=51.16666723333333 +lat_2=49.8333339 '
-                 + '+lat_0=90 +lon_0=4.367486666666666 +x_0=150000.013 '
-                 + '+y_0=5400088.438 +ellps=intl '
-                 + '+towgs84=-106.869,52.2978,-103.724,0.3366,-0.457,1.8422,-1.2747 '
-                 + '+units=m +no_defs';
+  const PROJ_L72    = '+proj=lcc +lat_1=51.16666723333333 +lat_2=49.8333339 '
+                    + '+lat_0=90 +lon_0=4.367486666666666 +x_0=150000.013 '
+                    + '+y_0=5400088.438 +ellps=intl '
+                    + '+towgs84=-106.869,52.2978,-103.724,0.3366,-0.457,1.8422,-1.2747 '
+                    + '+units=m +no_defs';
 
-  // ── État interne ───────────────────────────────────────────────
-  let _searchSource = 'osm';    // 'osm' | 'urbis'
+  let _searchSource = 'osm';
   let _searchIdx    = null;
   let _idxLoading   = false;
   let _idxCallbacks = [];
@@ -594,14 +560,13 @@
   let _activeItem   = -1;
   let _currentItems = [];
 
-  // ── DOM ────────────────────────────────────────────────────────
   const srBar      = document.getElementById('search-bar');
   const srToggle   = document.getElementById('search-toggle');
   const srInput    = document.getElementById('search-input');
   const srClear    = document.getElementById('search-clear');
   const srDropdown = document.getElementById('search-dropdown');
 
-  // ── Utilitaires ───────────────────────────────────────────────
+  // ── Utilitaires ────────────────────────────────────────────────
   function srNorm(s) {
     if (!s) return '';
     return s.toLowerCase().trim()
@@ -619,13 +584,16 @@
   function srFuzzy(query, text) {
     const q = srNorm(query), t = srNorm(text);
     if (!q||!t) return 0;
-    if (t===q) return 100; if (t.startsWith(q)) return 90; if (t.includes(q)) return 70;
-    const hits = q.split(' ').filter(w => t.includes(w)).length;
-    if (hits===q.split(' ').length) return 60;
-    return hits > 0 ? 35 + (hits/q.split(' ').length)*20 : 0;
+    if (t === q)           return 100;
+    if (t.startsWith(q))  return 90;
+    if (t.includes(q))    return 70;
+    const qw = q.split(' ');
+    const hits = qw.filter(w => w.length > 1 && t.includes(w)).length;
+    if (hits === qw.length) return 60;
+    return hits > 0 ? 35 + (hits / qw.length) * 20 : 0;
   }
 
-  // ── Proj4 (pour coordonnées Lambert 72 de l'API UrbIS) ────────
+  // ── Proj4 lazy-load (coordonnées Lambert 72 → WGS84 pour UrbIS) ──
   let _proj4Promise = null;
   function ensureProj4() {
     if (!_proj4Promise) {
@@ -633,7 +601,7 @@
         if (window.proj4) { ok(); return; }
         const s = document.createElement('script');
         s.src = 'https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.min.js';
-        s.onload = ok; s.onerror = fail;
+        s.onload = ok; s.onerror = () => fail(new Error('proj4.js indisponible'));
         document.head.appendChild(s);
       });
     }
@@ -653,89 +621,187 @@
       _idxCallbacks.push({ ok, fail });
       if (_idxLoading) return;
       _idxLoading = true;
-      fetch(SEARCH_INDEX_URL)
-        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      fetch('search-index.json')
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then(data => { _searchIdx = data; _idxCallbacks.forEach(cb => cb.ok(data)); _idxCallbacks = []; })
         .catch(err => { _idxLoading = false; _idxCallbacks.forEach(cb => cb.fail(err)); _idxCallbacks = []; });
     });
   }
 
-  // ── Recherche locale OSM ──────────────────────────────────────
+  // ── Recherche locale OSM ─────────────────────────────────────
+  // FIX : on ne coupe plus la boucle sur le nombre de résultats.
+  // Pour une recherche de rue (sans numéro) : on parcourt les adresses pour
+  // collecter UNE coordonnée représentative par rue candidate, dans l'ordre
+  // du score — donc "Rue Royale" (score 90) arrive toujours avant
+  // "Rue du Musée" (score 45) dans les résultats finaux.
   function searchLocal(query, maxR) {
     const { s: streets, sn: streetNorms, a: addresses } = _searchIdx;
+
+    // Séparer numéro éventuel en fin de saisie : "rue royale 80"
     const m = query.match(/^(.*?)\s+(\d[\d\w]?)$/);
     const streetQuery = m ? m[1] : query;
     const numFilter   = m ? m[2].toLowerCase() : null;
     const qNorm = srNorm(streetQuery);
 
-    const scored = streetNorms
+    // 1. Scorer toutes les rues, garder les meilleures candidates
+    const candidates = streetNorms
       .map((sn, i) => ({ i, score: srFuzzy(qNorm, sn) }))
       .filter(x => x.score > 0)
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => b.score - a.score)
+      .slice(0, numFilter ? 20 : maxR + 5);
 
-    const topStreets = new Set(scored.slice(0, 20).map(x => x.i));
-    const results = [], seen = new Set();
+    if (!candidates.length) return [];
 
-    for (const [sid, num, lat, lon] of addresses) {
-      if (!topStreets.has(sid)) continue;
-      if (numFilter && !num.toLowerCase().startsWith(numFilter)) continue;
-      const key = `${sid}_${num}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const score = scored.find(x => x.i === sid)?.score ?? 0;
-      results.push({
-        label:  numFilter ? `${streets[sid]} ${num}` : streets[sid],
-        sub:    '',
-        lngLat: [lon, lat],
-        score:  numFilter ? score + (num === numFilter ? 10 : 0) : score,
-        source: 'osm',
-      });
-      if (results.length >= maxR * 3) break;
+    const scoreMap = new Map(candidates.map(x => [x.i, x.score]));
+
+    if (!numFilter) {
+      // Recherche de rue : une coordonnée représentative par rue candidate.
+      // On parcourt TOUT le tableau d'adresses mais on s'arrête dès qu'on a
+      // une coordonnée pour chaque candidate — pas de coupure arbitraire.
+      const streetCoords = new Map();
+      for (const [sid, , lat, lon] of addresses) {
+        if (scoreMap.has(sid) && !streetCoords.has(sid)) {
+          streetCoords.set(sid, [lon, lat]);
+          if (streetCoords.size === candidates.length) break;
+        }
+      }
+      // Résultats dans l'ordre du score (candidates est déjà trié)
+      return candidates
+        .filter(c => streetCoords.has(c.i))
+        .slice(0, maxR)
+        .map(c => ({
+          label:  streets[c.i],
+          sub:    '',
+          lngLat: streetCoords.get(c.i),
+          score:  c.score,
+          source: 'osm',
+        }));
+    } else {
+      // Recherche avec numéro : scan complet, pas de coupure prématurée
+      const results = [], seen = new Set();
+      for (const [sid, num, lat, lon] of addresses) {
+        if (!scoreMap.has(sid)) continue;
+        if (!num.toLowerCase().startsWith(numFilter)) continue;
+        const key = `${sid}_${num}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push({
+          label:  `${streets[sid]} ${num}`,
+          sub:    '',
+          lngLat: [lon, lat],
+          score:  scoreMap.get(sid) + (num.toLowerCase() === numFilter ? 10 : 0),
+          source: 'osm',
+        });
+      }
+      return results.sort((a, b) => b.score - a.score).slice(0, maxR);
     }
-
-    // Sans filtre numéro → une entrée par rue (premier point trouvé)
-    const final = numFilter ? results : (() => {
-      const perStreet = new Map();
-      for (const r of results) { if (!perStreet.has(r.label)) perStreet.set(r.label, r); }
-      return [...perStreet.values()];
-    })();
-
-    return final.sort((a, b) => b.score - a.score).slice(0, maxR);
   }
 
   // ── Recherche UrbIS API ───────────────────────────────────────
+  // Utilise searchStreetName (rue seule) ou searchAddress (rue + numéro).
+  // Le modèle BeStPlus s'applique aux deux endpoints structurés.
+  // Le parsing gère les deux niveaux d'enveloppement possibles du JSON BeSt.
+  function _bestName(geographicalName) {
+    if (!Array.isArray(geographicalName)) return '';
+    return (geographicalName.find(n => n.language === 'fr') || geographicalName[0] || {}).spelling || '';
+  }
+  function _bestPos(obj) {
+    // Cherche un {x, y} Lambert 72 dans les chemins courants de la réponse BeSt
+    const candidates = [
+      obj?.position,
+      obj?.addressPosition,
+      obj?.address?.position,
+      obj?.streetName?.position,
+      obj?.address?.streetName?.position,
+    ];
+    for (const c of candidates) {
+      if (c?.x != null && c?.y != null) return { x: +c.x, y: +c.y };
+    }
+    return null;
+  }
+
   async function searchUrbis(query, maxR) {
-    const url = new URL(URBIS_FREE_SEARCH);
-    url.searchParams.set('searchLanguage', 'fr');
-    url.searchParams.set('freeText', query);
-    url.searchParams.set('model', 'BeStPlus');
+    const m = query.match(/^(.*?)\s+(\d[\d\w]?)$/);
+    const streetPart = m ? m[1].trim() : query.trim();
+    const numPart    = m ? m[2] : null;
 
-    const r = await fetch(url, { headers: { Accept: 'application/json' } });
-    if (!r.ok) throw new Error(`UrbIS ${r.status}`);
-    const data = await r.json();
+    let url;
+    if (numPart) {
+      // searchAddress : rue + numéro de police
+      url = new URL(`${URBIS_BASE}/searchAddress`);
+      url.searchParams.set('searchLanguage', 'fr');
+      url.searchParams.set('streetName',     streetPart);
+      url.searchParams.set('policeNumber',   numPart);
+      url.searchParams.set('model',          'BeStPlus');
+    } else {
+      // searchStreetName : autocomplétion de rue
+      url = new URL(`${URBIS_BASE}/searchStreetName`);
+      url.searchParams.set('searchLanguage', 'fr');
+      url.searchParams.set('streetName',     streetPart);
+      url.searchParams.set('model',          'BeStPlus');
+    }
+
+    let resp;
+    try {
+      resp = await fetch(url, { headers: { Accept: 'application/json' } });
+    } catch (netErr) {
+      // Erreur réseau (CORS, DNS, offline…)
+      console.error('[UrbIS] Erreur réseau :', netErr);
+      throw new Error(`Réseau : ${netErr.message}`);
+    }
+
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      console.error(`[UrbIS] HTTP ${resp.status}`, body);
+      throw new Error(`Serveur UrbIS : HTTP ${resp.status}`);
+    }
+
+    let data;
+    try {
+      data = await resp.json();
+    } catch (parseErr) {
+      console.error('[UrbIS] Réponse non-JSON :', parseErr);
+      throw new Error('Réponse UrbIS illisible (non-JSON)');
+    }
+
+    // La réponse peut être un tableau direct ou { result: [...] }
+    const items = Array.isArray(data) ? data
+                : Array.isArray(data?.result) ? data.result
+                : [];
+
     const results = [];
+    for (const item of items) {
+      // Deux formes possibles : item direct ou item enveloppé
+      const addr   = item.address   || item['ext:address']   || null;
+      const sn     = item.streetName|| item['ext:streetName'] || addr?.streetName || null;
 
-    for (const item of data?.result || []) {
-      const addr = item.address || item['ext:address'];
-      const sn   = item.streetName || item['ext:streetName'] || addr?.streetName || addr?.['ext:streetName'];
-      const pos  = addr?.position || sn?.position || item.position;
-      if (!pos?.x || !pos?.y) continue;
+      const pos = _bestPos(addr || sn || item);
+      if (!pos) continue;
 
-      const getName = obj => {
-        const names = obj?.geographicalName || obj?.nameList || [];
-        return (names.find(n => n.language === 'fr') || names[0] || {}).spelling || '';
-      };
+      let label, sub;
+      if (addr) {
+        const snLabel = _bestName(sn?.geographicalName);
+        const hn = addr.houseNumberAlphanumerical?.housenumber
+                || addr.houseNumber?.housenumber
+                || addr.housenumber || '';
+        const mun = _bestName(sn?.municipality?.geographicalName || addr.municipality?.geographicalName);
+        const pc  = String(sn?.postalInfo?.objectIdentifier || addr.postalInfo?.objectIdentifier || '');
+        label = hn ? `${snLabel} ${hn}`.trim() : snLabel;
+        sub   = [mun, pc].filter(Boolean).join(' · ');
+      } else if (sn) {
+        label = _bestName(sn.geographicalName);
+        const mun = _bestName(sn.municipality?.geographicalName);
+        const pc  = String(sn.postalInfo?.objectIdentifier || '');
+        sub   = [mun, pc].filter(Boolean).join(' · ');
+      } else {
+        continue;
+      }
 
-      const streetLabel = getName(sn) || getName(item.streetName);
-      const hn  = addr?.houseNumberAlphanumerical?.housenumber || addr?.houseNumber?.housenumber || '';
-      const mun = getName(sn?.municipality || addr?.municipality);
-      const pc  = (sn?.postalInfo?.objectIdentifier || addr?.postalInfo?.objectIdentifier || '').toString();
-      const label = hn ? `${streetLabel} ${hn}` : streetLabel;
       if (!label) continue;
 
       try {
         const lngLat = await lambertToLngLat(pos.x, pos.y);
-        results.push({ label, sub: [mun, pc].filter(Boolean).join(' · '), lngLat, score: srFuzzy(query, label), source: 'urbis' });
+        results.push({ label, sub, lngLat, score: srFuzzy(query, label), source: 'urbis' });
       } catch (_) {}
     }
 
@@ -743,9 +809,10 @@
   }
 
   // ── Dropdown ──────────────────────────────────────────────────
-  function srShowStatus(msg) {
+  function srShowStatus(msg, isError = false) {
     _currentItems = [];
-    srDropdown.innerHTML = `<li class="status-row">${srEsc(msg)}</li>`;
+    const cls = isError ? 'error-row' : 'status-row';
+    srDropdown.innerHTML = `<li class="${cls}">${srEsc(msg)}</li>`;
     srDropdown.classList.add('open');
   }
   function srRender(items, query) {
@@ -757,7 +824,8 @@
       const badge = r.source === 'osm'
         ? '<span class="sr-badge osm">OSM</span>'
         : '<span class="sr-badge">UrbIS</span>';
-      li.innerHTML = `<div class="sr-label">${srHL(r.label, query)}${badge}</div>${r.sub ? `<div class="sr-sub">${srEsc(r.sub)}</div>` : ''}`;
+      li.innerHTML = `<div class="sr-label">${srHL(r.label, query)}${badge}</div>`
+        + (r.sub ? `<div class="sr-sub">${srEsc(r.sub)}</div>` : '');
       li.addEventListener('click', () => srSelect(r));
       li.addEventListener('mouseenter', () => {
         _activeItem = i;
@@ -769,14 +837,14 @@
   }
   function srHide() { srDropdown.classList.remove('open'); _activeItem = -1; }
   function srMoveActive(dir) {
-    const lis = srDropdown.querySelectorAll('li:not(.status-row)');
+    const lis = srDropdown.querySelectorAll('li:not(.status-row):not(.error-row)');
     if (!lis.length) return;
-    _activeItem = Math.max(0, Math.min(lis.length-1, _activeItem+dir));
-    lis.forEach((li, i) => li.classList.toggle('active', i===_activeItem));
+    _activeItem = Math.max(0, Math.min(lis.length - 1, _activeItem + dir));
+    lis.forEach((li, i) => li.classList.toggle('active', i === _activeItem));
     lis[_activeItem]?.scrollIntoView({ block: 'nearest' });
   }
 
-  // ── Sélection d'un résultat ───────────────────────────────────
+  // ── Sélection ────────────────────────────────────────────────
   function srSelect(result) {
     srInput.value = result.label;
     srClear.classList.add('visible');
@@ -786,12 +854,13 @@
     _searchMarker = new maplibregl.Marker({ color: '#e74c3c' })
       .setLngLat([lon, lat])
       .setPopup(new maplibregl.Popup({ offset: 28, maxWidth: '240px' })
-        .setHTML(`<strong>${srEsc(result.label)}</strong>${result.sub ? `<br><span style="font-size:11px;color:#666">${srEsc(result.sub)}</span>` : ''}`))
+        .setHTML(`<strong>${srEsc(result.label)}</strong>`
+          + (result.sub ? `<br><span style="font-size:11px;color:#666">${srEsc(result.sub)}</span>` : '')))
       .addTo(map).togglePopup();
     map.flyTo({ center: [lon, lat], zoom: SEARCH_ZOOM, duration: 600 });
   }
 
-  // ── Dispatch selon la source choisie ─────────────────────────
+  // ── Dispatch ─────────────────────────────────────────────────
   async function srSearch(query) {
     srShowStatus('Recherche…');
     try {
@@ -807,27 +876,20 @@
         else srRender(results, query);
       }
     } catch (e) {
-      console.warn('[Search]', e);
-      srShowStatus('Erreur de connexion');
+      console.error('[Search]', e);
+      srShowStatus(e.message || 'Erreur', true);
     }
   }
 
-  // ── Événements ────────────────────────────────────────────────
-
-  // Toggle expand/collapse
+  // ── Événements ───────────────────────────────────────────────
   srToggle.addEventListener('click', () => {
     const expanded = srBar.classList.toggle('expanded');
-    if (expanded) {
-      srInput.focus();
-    } else {
-      srInput.value = '';
-      srClear.classList.remove('visible');
-      srHide();
+    if (expanded) { srInput.focus(); }
+    else {
+      srInput.value = ''; srClear.classList.remove('visible'); srHide();
       if (_searchMarker) { _searchMarker.remove(); _searchMarker = null; }
     }
   });
-
-  // Saisie
   srInput.addEventListener('input', () => {
     const q = srInput.value.trim();
     srClear.classList.toggle('visible', q.length > 0);
@@ -836,8 +898,6 @@
     clearTimeout(_debounceT);
     _debounceT = setTimeout(() => srSearch(q), 320);
   });
-
-  // Clavier
   srInput.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       if (srDropdown.classList.contains('open')) { srHide(); }
@@ -845,39 +905,28 @@
       return;
     }
     if (!srDropdown.classList.contains('open')) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); srMoveActive(1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); srMoveActive(-1); }
+    if (e.key === 'ArrowDown')      { e.preventDefault(); srMoveActive(1); }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); srMoveActive(-1); }
     else if (e.key === 'Enter' || e.key === 'Tab') {
       if (_activeItem >= 0 && _currentItems[_activeItem]) { e.preventDefault(); srSelect(_currentItems[_activeItem]); }
     }
   });
-
-  // Effacer
   srClear.addEventListener('click', () => {
     srInput.value = ''; srClear.classList.remove('visible'); srHide();
     if (_searchMarker) { _searchMarker.remove(); _searchMarker = null; }
     srInput.focus();
   });
-
-  // Toggle OSM / UrbIS
   document.querySelectorAll('.src-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       _searchSource = btn.dataset.src;
       document.querySelectorAll('.src-btn').forEach(b => b.classList.toggle('active', b === btn));
-      // Relancer la recherche si une saisie est en cours
       const q = srInput.value.trim();
       if (q.length >= 3) srSearch(q);
-      // Pré-charger l'index si on passe en mode OSM
       if (_searchSource === 'osm') loadIndex().catch(() => {});
     });
   });
-
-  // Fermer au clic carte
   map.on('click', () => { if (!lassoActive) srHide(); });
-
-  // Pré-charger l'index OSM au survol du bouton
   srToggle.addEventListener('mouseenter', () => loadIndex().catch(() => {}), { once: true });
-
 </script>
 </body>
 </html>
