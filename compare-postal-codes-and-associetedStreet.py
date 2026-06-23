@@ -10,6 +10,13 @@ Vérifications OSM combinées pour la Région de Bruxelles-Capitale.
     NB : un objet référencé deux fois dans LA MÊME relation (cas courant
     d'un node portant addr:housenumber="4;6", inscrit une fois par numéro)
     n'est PAS considéré comme une erreur et est donc exclu.
+  - Membres manquants : adresses OSM dont addr:street correspond au name
+    d'une relation associatedStreet existante, mais qui n'y figurent pas
+    comme membre. Si plusieurs relations existent pour la même rue
+    (doublons déjà signalés), l'adresse doit être membre d'au moins
+    l'une d'elles.
+  - Rôles invalides : membres d'une relation associatedStreet dont le
+    rôle est absent ou différent de 'street' ou 'house'.
   -> écrit : associated-streets-report.txt
 
 
@@ -144,8 +151,8 @@ class AssociatedStreetCollector(osmium.SimpleHandler):
 
 class AddressTagCollector(osmium.SimpleHandler):
     """
-    Seconde passe : pour chaque objet membre de ≥2 relations associatedStreet
-    distinctes, récupère ses tags addr:* pour le rapport.
+    Passe PBF générique : pour un ensemble de (type_char, ref) voulu,
+    récupère les tags addr:* de chaque objet correspondant.
     """
 
     def __init__(self, wanted_keys):
@@ -170,6 +177,42 @@ class AddressTagCollector(osmium.SimpleHandler):
     def relation(self, r):
         self._collect('r', r)
 
+
+class AllAddressCollector(osmium.SimpleHandler):
+    """
+    Collecte TOUS les objets OSM portant à la fois addr:housenumber et
+    addr:street (ou addr:street_official), sans filtrage par membership.
+    Utilisé pour détecter les adresses absentes de leur relation
+    associatedStreet.
+    """
+
+    def __init__(self):
+        super().__init__()
+        # (type_char, ref) -> dict de tous les tags addr:*
+        self.addresses = {}
+
+    def _collect(self, type_char, obj):
+        tags = {t.k: t.v for t in obj.tags}
+        hn = tags.get('addr:housenumber')
+        street = tags.get('addr:street') or tags.get('addr:street_official')
+        if not hn or not street:
+            return
+        addr_tags = {k: v for k, v in tags.items() if k.startswith('addr:')}
+        self.addresses[(type_char, obj.id)] = addr_tags
+
+    def node(self, n):
+        self._collect('n', n)
+
+    def way(self, w):
+        self._collect('w', w)
+
+    def relation(self, r):
+        self._collect('r', r)
+
+
+# ---------------------------------------------------------------------------
+# Fonctions de vérification
+# ---------------------------------------------------------------------------
 
 def check_missing_tags(relations):
     issues = []
@@ -277,8 +320,109 @@ def check_multi_membership(handler, pbf_path):
     return results
 
 
+def check_missing_members(handler, pbf_path):
+    """
+    Vérifie que toutes les adresses OSM dont addr:street correspond (après
+    normalisation) au name d'une relation associatedStreet existante sont
+    bien membres de cette relation.
+
+    Si plusieurs relations existent pour la même rue (doublons détectés par
+    check_duplicates), l'adresse doit être membre d'au moins l'une d'elles —
+    on ne la signale pas si elle appartient à une relation sœur.
+    """
+    # nom normalisé → ensemble des relation IDs associées
+    name_to_rel_ids = defaultdict(set)
+    rel_id_to_tags = {}
+    for rel in handler.relations:
+        rel_id_to_tags[rel['id']] = rel['tags']
+        name = rel['tags'].get('name', '').strip()
+        if name:
+            name_to_rel_ids[normalize(name)].add(rel['id'])
+
+    if not name_to_rel_ids:
+        return []
+
+    # rel_id → ensemble des (type_char, ref) membres
+    rel_member_set = {
+        rel['id']: {(m['type'], m['ref']) for m in rel['members']}
+        for rel in handler.relations
+    }
+
+    print('[OSM] Passe membres manquants : collecte de toutes les adresses...',
+          flush=True)
+    collector = AllAddressCollector()
+    collector.apply_file(pbf_path)
+    print(f'[OSM] {len(collector.addresses)} adresses '
+          f'(addr:housenumber + addr:street) trouvées', flush=True)
+
+    results = []
+    for (type_char, ref), addr_tags in sorted(collector.addresses.items()):
+        street = (addr_tags.get('addr:street') or
+                  addr_tags.get('addr:street_official') or '').strip()
+        if not street:
+            continue
+
+        matching_rels = name_to_rel_ids.get(normalize(street), set())
+        if not matching_rels:
+            continue  # aucune relation associatedStreet pour cette rue → pas une erreur
+
+        key = (type_char, ref)
+        is_member = any(key in rel_member_set.get(rid, set())
+                        for rid in matching_rels)
+        if not is_member:
+            results.append({
+                'type':         type_char,
+                'ref':          ref,
+                'addr_tags':    addr_tags,
+                'matching_rels': sorted(matching_rels),
+            })
+
+    return results
+
+
+def check_wrong_roles(handler, pbf_path):
+    """
+    Vérifie que chaque membre d'une relation associatedStreet porte un rôle
+    valide : 'street' (pour le(s) way(s) de la voirie) ou 'house' (pour les
+    adresses). Tout membre sans rôle ou avec un rôle autre est signalé.
+
+    Une passe PBF est effectuée pour enrichir le rapport avec les tags addr:*
+    des membres concernés (si disponibles).
+    """
+    VALID_ROLES = frozenset({'street', 'house'})
+    issues = []
+
+    for rel in handler.relations:
+        for m in rel['members']:
+            if m['role'] not in VALID_ROLES:
+                issues.append({
+                    'rel_id':   rel['id'],
+                    'rel_name': rel['tags'].get('name', '(sans nom)'),
+                    'type':     m['type'],
+                    'ref':      m['ref'],
+                    'role':     m['role'],
+                })
+
+    if issues:
+        wanted = {(iss['type'], iss['ref']) for iss in issues}
+        print(f'[OSM] Passe rôles invalides : récupération des tags pour '
+              f'{len(wanted)} membres...', flush=True)
+        tc = AddressTagCollector(wanted)
+        tc.apply_file(pbf_path)
+        for iss in issues:
+            iss['addr_tags'] = tc.addr_tags.get((iss['type'], iss['ref']), {})
+
+    return issues
+
+
+# ---------------------------------------------------------------------------
+# Écriture du rapport
+# ---------------------------------------------------------------------------
+
 def write_associated_streets_report(relations, missing_issues, duplicates,
-                                     multi_membership, rel_tags_map, path):
+                                     multi_membership, rel_tags_map,
+                                     missing_members, wrong_roles,
+                                     path):
     with open(path, 'w', encoding='utf-8') as f:
         f.write('=== associatedStreet relations – Rapport de vérification ===\n')
         f.write(f'Total relations analysées : {len(relations)}\n\n')
@@ -340,6 +484,59 @@ def write_associated_streets_report(relations, missing_issues, duplicates,
                 )
             f.write('\n')
 
+        # --- Membres manquants (NOUVEAU) -----------------------------------
+        f.write(f'--- Adresses absentes de leur relation associatedStreet '
+                f'({len(missing_members)} objets) ---\n\n')
+        if not missing_members:
+            f.write('Aucun problème détecté.\n\n')
+        for item in sorted(missing_members,
+                           key=lambda x: (
+                               x['addr_tags'].get('addr:street', ''),
+                               x['addr_tags'].get('addr:housenumber', ''),
+                           )):
+            type_label = _TYPE_LABELS.get(item['type'], item['type'])
+            ref = item['ref']
+            tags = item['addr_tags']
+            hn = tags.get('addr:housenumber', '')
+            st = (tags.get('addr:street') or
+                  tags.get('addr:street_official') or '')
+
+            f.write(f'  {type_label}/{ref}')
+            if hn or st:
+                f.write(f'  {hn} {st}'.rstrip())
+            f.write(f'\n    https://www.openstreetmap.org/{type_label}/{ref}\n')
+            f.write(f'    Relation(s) associatedStreet attendue(s) :\n')
+            for rid in item['matching_rels']:
+                rname = rel_tags_map.get(rid, {}).get('name', '(sans nom)')
+                f.write(
+                    f'      relation/{rid}  {rname}  '
+                    f'https://www.openstreetmap.org/relation/{rid}\n'
+                )
+            f.write('\n')
+
+        # --- Rôles invalides (NOUVEAU) -------------------------------------
+        n_rels_bad_roles = len({i['rel_id'] for i in wrong_roles}) if wrong_roles else 0
+        f.write(f'--- Membres avec rôle manquant ou invalide '
+                f'({len(wrong_roles)} membres dans {n_rels_bad_roles} relations) ---\n\n')
+        if not wrong_roles:
+            f.write('Aucun problème détecté.\n\n')
+        for item in sorted(wrong_roles,
+                           key=lambda x: (x['rel_name'], x['type'], x['ref'])):
+            type_label = _TYPE_LABELS.get(item['type'], item['type'])
+            ref = item['ref']
+            addr = item.get('addr_tags', {})
+            hn = addr.get('addr:housenumber', '')
+            st = addr.get('addr:street', '')
+            role_display = repr(item['role']) if item['role'] else "'(vide)'"
+
+            f.write(f'  {type_label}/{ref}')
+            if hn or st:
+                f.write(f'  ({hn} {st})'.rstrip())
+            f.write(f'  rôle actuel : {role_display}\n')
+            f.write(f'    https://www.openstreetmap.org/{type_label}/{ref}\n')
+            f.write(f'    dans relation/{item["rel_id"]}  {item["rel_name"]}  '
+                    f'https://www.openstreetmap.org/relation/{item["rel_id"]}\n\n')
+
     print(f'[OK] Rapport écrit : {path}')
 
 
@@ -359,10 +556,20 @@ def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT):
     multi_membership = check_multi_membership(handler, pbf_path)
     print(f'[CHECK] {len(multi_membership)} adresses dans ≥2 associatedStreet distinctes')
 
+    missing_members = check_missing_members(handler, pbf_path)
+    print(f'[CHECK] {len(missing_members)} adresses absentes de leur associatedStreet')
+
+    wrong_roles = check_wrong_roles(handler, pbf_path)
+    print(f'[CHECK] {len(wrong_roles)} membres avec rôle manquant ou invalide')
+
     rel_tags_map = {rel['id']: rel['tags'] for rel in relations}
 
-    write_associated_streets_report(relations, missing_issues, duplicates,
-                                     multi_membership, rel_tags_map, output_path)
+    write_associated_streets_report(
+        relations, missing_issues, duplicates,
+        multi_membership, rel_tags_map,
+        missing_members, wrong_roles,
+        output_path,
+    )
 
 
 # ===========================================================================
