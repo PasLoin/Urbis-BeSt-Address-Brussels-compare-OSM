@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-06-23
+ 
+### Ajouté
+ 
+- **Widget de recherche d'adresses** - Bouton loupe replié positionné sous l'outil lasso (top left). Un clic déplie un champ de saisie. Deux sources sélectionnables via un toggle `[OSM] [UrbIS]` intégré dans la barre :
+  - **Mode OSM** : recherche instantanée  dans un index local `search-index.json` généré au build depuis le PBF Bruxelles. Supporte la saisie partielle (`Rue Roya ...`) et la recherche par numéro (`Rue Royale 80`). Navigation clavier ↑↓ Entrée Échap.
+  - **Mode UrbIS** : appel à l'API officielle Brussels BeSt Geocoding (`searchStreetName` pour les rues, `searchAddress` pour rue + numéro) déclenché uniquement sur Entrée — pas sur frappe, l'API n'étant pas conçue pour l'autocomplétion keystroke-by-keystroke.
+  - Résultat sélectionné : marker rouge sur la carte + popup + `flyTo` zoom 18.
+  - Badge source (`OSM` vert / `UrbIS` bleu) affiché sur chaque suggestion.
+  - Mise en surbrillance de la partie de texte correspondant à la saisie.
+  - Fermeture automatique du dropdown au clic sur la carte ou à Échap.
+
+
 ## 2026-05-03
 
 ### Ajouté
