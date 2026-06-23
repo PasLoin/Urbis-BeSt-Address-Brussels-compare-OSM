@@ -29,7 +29,7 @@ jobs:
       - name: Run postal code + associatedStreet checks
         run: python3 compare-postal-codes-and-associetedStreet.py
       - name: Upload reports and debug GeoJSON
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reports-${{ github.run_id }}
           path: |
