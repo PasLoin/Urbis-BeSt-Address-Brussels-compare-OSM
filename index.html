@@ -688,16 +688,33 @@
   }
 
   // ── UrbIS API ──────────────────────────────────────────────────
-  // L'API renvoie un tableau plat : chaque item EST l'objet lui-même.
-  // 4 cas détectés par les clés présentes sur l'item.
-  function _geoName(arr) {
+  // Structure réelle de la réponse (vérifiée sur l'API) :
+  // { resultsList: [{ result: [{ score, address?, streetname?, municipality? }] }] }
+  //
+  // Position : position.pointGeometry.point.pos = "149556.559 170779.749" (string)
+  // Street   : hasStreetName.streetname.name[{language,spelling}]
+  // Mun      : hasMunicipality.name[{language,spelling}]
+  // CP       : hasPostalInfo.code.objectIdentifier
+
+  function _getName(arr) {
     if (!Array.isArray(arr)) return '';
     return (arr.find(n => n.language === 'fr') || arr[0] || {}).spelling || '';
   }
-  function _pos(obj) {
-    if (!obj) return null;
-    const p = obj.position || obj.addressPosition;
-    return (p?.x != null && p?.y != null) ? { x: +p.x, y: +p.y } : null;
+
+  function _parsePos(obj) {
+    // "pos" est une string espace-séparée : "149556.559 170779.749"
+    const posStr = obj?.position?.pointGeometry?.point?.pos;
+    if (typeof posStr === 'string') {
+      const parts = posStr.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const x = parseFloat(parts[0]), y = parseFloat(parts[1]);
+        if (!isNaN(x) && !isNaN(y)) return { x, y };
+      }
+    }
+    // Fallback : tableau de valeurs (format swagger schema)
+    if (Array.isArray(posStr) && posStr.length >= 2)
+      return { x: parseFloat(posStr[0]), y: parseFloat(posStr[1]) };
+    return null;
   }
 
   async function searchUrbis(query, maxR) {
@@ -727,69 +744,52 @@
     }
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
-      throw new Error(`UrbIS HTTP ${resp.status} — ${body.slice(0, 80)}`);
+      throw new Error(`UrbIS HTTP ${resp.status} \u2014 ${body.slice(0, 80)}`);
     }
 
     const data = await resp.json();
-    console.log('[UrbIS] réponse brute :', data); // à retirer une fois stable
-
-    const items = Array.isArray(data)         ? data
-                : Array.isArray(data?.result) ? data.result
-                : [];
 
     const results = [];
-    for (const item of items) {
-      let label = '', sub = '', pos = null;
 
-      // Cas 1 : item a un housenumber → adresse (searchAddress)
-      const hn = item.houseNumberAlphanumerical?.housenumber
-              || item.houseNumber?.housenumber
-              || item.housenumber || '';
-      if (hn) {
-        const sn      = item.streetName || item['ext:streetName'] || {};
-        const snLabel = _geoName(sn.geographicalName || sn.nameList);
-        const mun     = _geoName(sn.municipality?.geographicalName);
-        const pc      = String(sn.postalInfo?.objectIdentifier || item.postalInfo?.objectIdentifier || '');
-        label = `${snLabel} ${hn}`.trim();
-        sub   = [mun, pc].filter(Boolean).join(' \u00b7 ');
-        pos   = _pos(item) || _pos(sn);
+    // Parcourir resultsList[n].result[m]
+    for (const group of (data.resultsList || [])) {
+      for (const item of (group.result || [])) {
 
-      // Cas 2 : item a geographicalName → rue en tableau plat (searchStreetName)
-      } else if (item.geographicalName || item.nameList) {
-        label = _geoName(item.geographicalName || item.nameList);
-        const mun = _geoName(item.municipality?.geographicalName);
-        const pc  = String(item.postalInfo?.objectIdentifier || '');
-        sub   = [mun, pc].filter(Boolean).join(' \u00b7 ');
-        pos   = _pos(item);
+        let label = '', sub = '', pos = null;
 
-      // Cas 3 : item enveloppe { streetName: {...} }
-      } else if (item.streetName || item['ext:streetName']) {
-        const sn  = item.streetName || item['ext:streetName'];
-        label = _geoName(sn.geographicalName || sn.nameList);
-        const mun = _geoName(sn.municipality?.geographicalName);
-        const pc  = String(sn.postalInfo?.objectIdentifier || '');
-        sub   = [mun, pc].filter(Boolean).join(' \u00b7 ');
-        pos   = _pos(sn) || _pos(item);
+        if (item.address) {
+          // ── Adresse (searchAddress) ──────────────────────────────
+          const addr = item.address;
+          const sn   = addr.hasStreetName?.streetname;
+          label = _getName(sn?.name);
+          const hn  = addr.houseNumber || '';
+          if (hn) label = `${label} ${hn}`.trim();
+          const mun = _getName(addr.hasMunicipality?.name);
+          const pc  = addr.hasPostalInfo?.code?.objectIdentifier || '';
+          sub = [mun, pc].filter(Boolean).join(' \u00b7 ');
+          pos = _parsePos(addr);
 
-      // Cas 4 : item enveloppe { address: {...} }
-      } else if (item.address || item['ext:address']) {
-        const addr    = item.address || item['ext:address'];
-        const sn      = addr.streetName || addr['ext:streetName'] || {};
-        const addrHn  = addr.houseNumberAlphanumerical?.housenumber || addr.housenumber || '';
-        const snLabel = _geoName(sn.geographicalName || sn.nameList);
-        const mun     = _geoName(sn.municipality?.geographicalName || addr.municipality?.geographicalName);
-        const pc      = String(sn.postalInfo?.objectIdentifier || addr.postalInfo?.objectIdentifier || '');
-        label = addrHn ? `${snLabel} ${addrHn}`.trim() : snLabel;
-        sub   = [mun, pc].filter(Boolean).join(' \u00b7 ');
-        pos   = _pos(addr) || _pos(sn) || _pos(item);
+        } else if (item.streetname) {
+          // ── Rue (searchStreetName) ───────────────────────────────
+          const sn  = item.streetname;
+          label = _getName(sn?.name);
+          const mun = _getName(item.municipality?.name);
+          sub = mun || '';
+          pos = _parsePos(sn) || _parsePos(item);
 
-      } else { continue; }
+        } else if (item.municipality) {
+          // ── Commune ──────────────────────────────────────────────
+          label = _getName(item.municipality.name);
+          pos   = _parsePos(item.municipality);
 
-      if (!label || !pos) continue;
-      try {
-        const lngLat = await lambertToLngLat(pos.x, pos.y);
-        results.push({ label, sub, lngLat, score: srFuzzy(query, label), source: 'urbis' });
-      } catch (_) {}
+        } else { continue; }
+
+        if (!label || !pos) continue;
+        try {
+          const lngLat = await lambertToLngLat(pos.x, pos.y);
+          results.push({ label, sub, lngLat, score: srFuzzy(query, label), source: 'urbis' });
+        } catch (_) {}
+      }
     }
 
     return results.sort((a, b) => b.score - a.score).slice(0, maxR);
