@@ -11,9 +11,7 @@
   <meta property="og:type" content="website">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css"/>
   <link rel="stylesheet" href="style.css"/>
-
   <style>
-  /* ── Search control ─────────────────────────────────────────── */
   #search-control {
     position: absolute;
     top: 54px;
@@ -80,7 +78,6 @@
   }
   #search-clear:hover { color: #555; }
   #search-clear.visible { display: flex; }
-  /* Source toggle */
   #search-src-pill {
     display: none;
     background: #f0f0f0;
@@ -109,7 +106,6 @@
     color: #222;
     box-shadow: 0 1px 3px rgba(0,0,0,.18);
   }
-  /* Dropdown */
   #search-dropdown {
     display: none;
     position: absolute;
@@ -161,7 +157,6 @@
 </head>
 <body>
 <div id="map"></div>
-
 <button id="lasso-btn" title="Sélection lasso">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M7 22a5 5 0 0 1-2-4"/>
@@ -173,15 +168,12 @@
   </svg>
   Lasso
 </button>
-
 <div id="lasso-panel">
   <strong id="lasso-count">0</strong> adresse(s) sélectionnée(s)
   <br>
   <button id="lasso-export">Exporter .osm</button>
   <button id="lasso-cancel">Annuler</button>
 </div>
-
-<!-- ── Search widget ─────────────────────────────────────────────── -->
 <div id="search-control">
   <div id="search-bar">
     <button id="search-toggle" title="Rechercher une adresse" aria-label="Rechercher une adresse">
@@ -204,9 +196,7 @@
   </div>
   <ul id="search-dropdown" role="listbox"></ul>
 </div>
-
 <div id="copy-toast">ID copié !</div>
-
 <details id="panel" open>
   <summary>Filtres <span class="toggle-arrow"></span></summary>
   <label class="filter-row">
@@ -238,11 +228,9 @@
     <div>OSM : <span id="osm-date">…</span></div>
   </div>
 </details>
-
 <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
 <script>
-  // ─── Versions & Stats ───────────────────────────
   fetch('version.json')
     .then(r => r.json())
     .then(v => {
@@ -276,7 +264,6 @@
       document.getElementById('osm-date').textContent = 'N/A';
     });
 
-  // ─── Helpers ─────────────────────────────────────
   function extractInspireId(raw) {
     if (!raw) return null;
     const m = String(raw).match(/(\d+)$/);
@@ -329,12 +316,10 @@
     t._timer = setTimeout(() => { t.style.display = 'none'; }, 1500);
   }
 
-  // ─── Map ─────────────────────────────────────────
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol('pmtiles', protocol.tile);
   const p = new pmtiles.PMTiles('addresses.pmtiles.gz');
   protocol.add(p);
-
   const STATUS_COLOR = [
     'match', ['get', 'status'],
     'ok',                       '#2ecc71',
@@ -343,7 +328,6 @@
     'missing_in_urbis_verified','#ffc800',
     '#e74c3c'
   ];
-
   const map = new maplibregl.Map({
     container: 'map',
     attributionControl: false,
@@ -365,16 +349,13 @@
     zoom: 10,
     maxZoom: 19
   });
-
   map.addControl(new maplibregl.AttributionControl({ compact: false, customAttribution: [
     'Adresses : <a href="https://datastore.brussels/web/data/dataset/a8c9ccde-5c2b-11ed-913a-900f0cda5d5c" target="_blank">Paradigm</a> (CC-0)',
     '<a href="https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM" target="_blank">PasLoin</a>'
   ]}));
   map.addControl(new maplibregl.NavigationControl(), 'bottom-left');
 
-  // ─── Filters ─────────────────────────────────────
   const filters = { ok: false, missing: true, verified_absent: false, missing_in_urbis: false, missing_in_urbis_verified: false };
-
   function applyFilters() {
     if (!map.getLayer('addresses-points')) return;
     const active = Object.entries(filters).filter(([,v]) => v).map(([k]) => k);
@@ -386,7 +367,6 @@
       map.setFilter('addresses-points', ['in', ['get', 'status'], ['literal', active]]);
     }
   }
-
   map.on('load', () => {
     map.addSource('addresses-source', { type: 'vector', url: 'pmtiles://addresses.pmtiles.gz' });
     map.addLayer({
@@ -404,7 +384,6 @@
     map.addLayer({ id: 'lasso-line', type: 'line', source: 'lasso-source', paint: { 'line-color': '#2980b9', 'line-width': 2, 'line-dasharray': [3, 2] } });
   });
 
-  // ─── Popup on click ──────────────────────────────
   map.on('click', 'addresses-points', (e) => {
     if (lassoActive) return;
     const pr = e.features[0].properties;
@@ -456,23 +435,19 @@
       }
     }, 50);
   });
-
   map.on('mouseenter', 'addresses-points', () => { if (!lassoActive) map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', 'addresses-points', () => { if (!lassoActive) map.getCanvas().style.cursor = ''; });
 
-  // ─── Filter controls ─────────────────────────────
   document.getElementById('f-ok').addEventListener('change', e => { filters.ok = e.target.checked; applyFilters(); });
   document.getElementById('f-missing').addEventListener('change', e => { filters.missing = e.target.checked; applyFilters(); });
   document.getElementById('f-verified').addEventListener('change', e => { filters.verified_absent = e.target.checked; applyFilters(); });
   document.getElementById('f-missing-urbis').addEventListener('change', e => { filters.missing_in_urbis = e.target.checked; applyFilters(); });
   document.getElementById('f-missing-urbis-verified').addEventListener('change', e => { filters.missing_in_urbis_verified = e.target.checked; applyFilters(); });
 
-  // ─── Lasso ───────────────────────────────────────
   let lassoActive = false, lassoPoints = [], lassoSelectedFeatures = [];
   const lassoBtn = document.getElementById('lasso-btn');
   const lassoPanel = document.getElementById('lasso-panel');
   const lassoCountEl = document.getElementById('lasso-count');
-
   function toggleLasso() {
     lassoActive = !lassoActive;
     lassoBtn.classList.toggle('active', lassoActive);
@@ -538,10 +513,6 @@
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════
-  // SEARCH WIDGET
-  // ═══════════════════════════════════════════════════════════════
-
   const URBIS_BASE  = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
   const SEARCH_MAX  = 7;
   const SEARCH_ZOOM = 18;
@@ -550,7 +521,6 @@
                     + '+y_0=5400088.438 +ellps=intl '
                     + '+towgs84=-106.869,52.2978,-103.724,0.3366,-0.457,1.8422,-1.2747 '
                     + '+units=m +no_defs';
-
   let _searchSource = 'osm';
   let _searchIdx    = null;
   let _idxLoading   = false;
@@ -559,14 +529,12 @@
   let _debounceT    = null;
   let _activeItem   = -1;
   let _currentItems = [];
-
   const srBar      = document.getElementById('search-bar');
   const srToggle   = document.getElementById('search-toggle');
   const srInput    = document.getElementById('search-input');
   const srClear    = document.getElementById('search-clear');
   const srDropdown = document.getElementById('search-dropdown');
 
-  // ── Utilitaires ────────────────────────────────────────────────
   function srNorm(s) {
     if (!s) return '';
     return s.toLowerCase().trim()
@@ -594,7 +562,6 @@
     return hits > 0 ? 35 + (hits / qw.length) * 20 : 0;
   }
 
-  // ── Proj4 lazy-load ────────────────────────────────────────────
   let _proj4Promise = null;
   function ensureProj4() {
     if (!_proj4Promise) {
@@ -615,7 +582,6 @@
     return [lon, lat];
   }
 
-  // ── Index OSM ──────────────────────────────────────────────────
   function loadIndex() {
     return new Promise((ok, fail) => {
       if (_searchIdx) { ok(_searchIdx); return; }
@@ -629,26 +595,19 @@
     });
   }
 
-  // ── Recherche OSM locale ───────────────────────────────────────
-  // Pas de coupure prématurée : on collecte UNE coordonnée par rue
-  // candidate dans l'ordre du score — "Rue Royale" (score 90) avant
-  // "Rue du Musée" (score 45) quoi qu'il arrive dans le JSON.
   function searchLocal(query, maxR) {
     const { s: streets, sn: streetNorms, a: addresses } = _searchIdx;
-    const m = query.match(/^(.*?)\s+(\d[\d\w]?)$/);
+    const m = query.match(/^(.*?)[,\s]+(\d+[a-zA-Z]?)$/);
     const streetQuery = m ? m[1] : query;
     const numFilter   = m ? m[2].toLowerCase() : null;
     const qNorm = srNorm(streetQuery);
-
     const candidates = streetNorms
       .map((sn, i) => ({ i, score: srFuzzy(qNorm, sn) }))
       .filter(x => x.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, numFilter ? 20 : maxR + 5);
-
     if (!candidates.length) return [];
     const scoreMap = new Map(candidates.map(x => [x.i, x.score]));
-
     if (!numFilter) {
       const streetCoords = new Map();
       for (const [sid, , lat, lon] of addresses) {
@@ -687,22 +646,11 @@
     }
   }
 
-  // ── UrbIS API ──────────────────────────────────────────────────
-  // Structure réelle de la réponse (vérifiée sur l'API) :
-  // { resultsList: [{ result: [{ score, address?, streetname?, municipality? }] }] }
-  //
-  // Position : position.pointGeometry.point.pos = "149556.559 170779.749" (string)
-  // Street   : hasStreetName.streetname.name[{language,spelling}]
-  // Mun      : hasMunicipality.name[{language,spelling}]
-  // CP       : hasPostalInfo.code.objectIdentifier
-
   function _getName(arr) {
     if (!Array.isArray(arr)) return '';
     return (arr.find(n => n.language === 'fr') || arr[0] || {}).spelling || '';
   }
-
   function _parsePos(obj) {
-    // "pos" est une string espace-séparée : "149556.559 170779.749"
     const posStr = obj?.position?.pointGeometry?.point?.pos;
     if (typeof posStr === 'string') {
       const parts = posStr.trim().split(/\s+/);
@@ -711,17 +659,14 @@
         if (!isNaN(x) && !isNaN(y)) return { x, y };
       }
     }
-    // Fallback : tableau de valeurs (format swagger schema)
     if (Array.isArray(posStr) && posStr.length >= 2)
       return { x: parseFloat(posStr[0]), y: parseFloat(posStr[1]) };
     return null;
   }
-
   async function searchUrbis(query, maxR) {
-    const m = query.match(/^(.*?)\s+(\d[\d\w]?)$/);
+    const m = query.match(/^(.*?)[,\s]+(\d+[a-zA-Z]?)$/);
     const streetPart = (m ? m[1] : query).trim();
     const numPart    = m ? m[2] : null;
-
     let url;
     if (numPart) {
       url = new URL(`${URBIS_BASE}/searchAddress`);
@@ -735,7 +680,6 @@
       url.searchParams.set('streetName',     streetPart);
       url.searchParams.set('model',          'BeStPlus');
     }
-
     let resp;
     try {
       resp = await fetch(url, { headers: { Accept: 'application/json' } });
@@ -746,19 +690,12 @@
       const body = await resp.text().catch(() => '');
       throw new Error(`UrbIS HTTP ${resp.status} \u2014 ${body.slice(0, 80)}`);
     }
-
     const data = await resp.json();
-
     const results = [];
-
-    // Parcourir resultsList[n].result[m]
     for (const group of (data.resultsList || [])) {
       for (const item of (group.result || [])) {
-
         let label = '', sub = '', pos = null;
-
         if (item.address) {
-          // ── Adresse (searchAddress) ──────────────────────────────
           const addr = item.address;
           const sn   = addr.hasStreetName?.streetname;
           label = _getName(sn?.name);
@@ -768,22 +705,16 @@
           const pc  = addr.hasPostalInfo?.code?.objectIdentifier || '';
           sub = [mun, pc].filter(Boolean).join(' \u00b7 ');
           pos = _parsePos(addr);
-
         } else if (item.streetname) {
-          // ── Rue (searchStreetName) ───────────────────────────────
           const sn  = item.streetname;
           label = _getName(sn?.name);
           const mun = _getName(item.municipality?.name);
           sub = mun || '';
           pos = _parsePos(sn) || _parsePos(item);
-
         } else if (item.municipality) {
-          // ── Commune ──────────────────────────────────────────────
           label = _getName(item.municipality.name);
           pos   = _parsePos(item.municipality);
-
         } else { continue; }
-
         if (!label || !pos) continue;
         try {
           const lngLat = await lambertToLngLat(pos.x, pos.y);
@@ -791,11 +722,9 @@
         } catch (_) {}
       }
     }
-
     return results.sort((a, b) => b.score - a.score).slice(0, maxR);
   }
 
-  // ── Dropdown ──────────────────────────────────────────────────
   function srShowStatus(msg, isError = false) {
     _currentItems = [];
     srDropdown.innerHTML = `<li class="${isError ? 'error-row' : 'status-row'}">${srEsc(msg)}</li>`;
@@ -830,7 +759,6 @@
     lis[_activeItem]?.scrollIntoView({ block: 'nearest' });
   }
 
-  // ── Sélection ─────────────────────────────────────────────────
   function srSelect(result) {
     srInput.value = result.label;
     srClear.classList.add('visible');
@@ -846,7 +774,6 @@
     map.flyTo({ center: [lon, lat], zoom: SEARCH_ZOOM, duration: 600 });
   }
 
-  // ── Dispatch ──────────────────────────────────────────────────
   async function srSearch(query) {
     srShowStatus('Recherche\u2026');
     try {
@@ -867,7 +794,6 @@
     }
   }
 
-  // ── Événements ────────────────────────────────────────────────
   srToggle.addEventListener('click', () => {
     const expanded = srBar.classList.toggle('expanded');
     if (expanded) {
@@ -877,7 +803,6 @@
       if (_searchMarker) { _searchMarker.remove(); _searchMarker = null; }
     }
   });
-
   srInput.addEventListener('input', () => {
     const q = srInput.value.trim();
     srClear.classList.toggle('visible', q.length > 0);
@@ -891,7 +816,6 @@
       if (q.length >= 3) srShowStatus('\u21b5  Appuyez sur Entr\u00e9e pour rechercher');
     }
   });
-
   srInput.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       if (srDropdown.classList.contains('open')) { srHide(); }
@@ -914,13 +838,11 @@
       if (_activeItem >= 0 && _currentItems[_activeItem]) { e.preventDefault(); srSelect(_currentItems[_activeItem]); }
     }
   });
-
   srClear.addEventListener('click', () => {
     srInput.value = ''; srClear.classList.remove('visible'); srHide();
     if (_searchMarker) { _searchMarker.remove(); _searchMarker = null; }
     srInput.focus();
   });
-
   document.querySelectorAll('.src-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       _searchSource = btn.dataset.src;
@@ -935,10 +857,8 @@
       if (_searchSource === 'osm') loadIndex().catch(() => {});
     });
   });
-
   map.on('click', () => { if (!lassoActive) srHide(); });
   srToggle.addEventListener('mouseenter', () => loadIndex().catch(() => {}), { once: true });
-
 </script>
 </body>
 </html>
