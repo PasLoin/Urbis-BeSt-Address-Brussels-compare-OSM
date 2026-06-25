@@ -41,6 +41,7 @@ import unicodedata
 import re
 from collections import defaultdict
 from datetime import datetime, date, timedelta
+from itertools import groupby
 
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -484,37 +485,62 @@ def write_associated_streets_report(relations, missing_issues, duplicates,
                 )
             f.write('\n')
 
-        # --- Membres manquants (NOUVEAU) -----------------------------------
+        # --- Membres manquants -------------------------------------------
+        # Triés en premier par nombre de relations candidates (1, puis 2,
+        # puis 3+), et à l'intérieur de chaque groupe par addr:street puis
+        # addr:housenumber (ordre lexicographique, inchangé).
         f.write(f'--- Adresses absentes de leur relation associatedStreet '
                 f'({len(missing_members)} objets) ---\n\n')
         if not missing_members:
             f.write('Aucun problème détecté.\n\n')
-        for item in sorted(missing_members,
-                           key=lambda x: (
-                               x['addr_tags'].get('addr:street', ''),
-                               x['addr_tags'].get('addr:housenumber', ''),
-                           )):
-            type_label = _TYPE_LABELS.get(item['type'], item['type'])
-            ref = item['ref']
-            tags = item['addr_tags']
-            hn = tags.get('addr:housenumber', '')
-            st = (tags.get('addr:street') or
-                  tags.get('addr:street_official') or '')
+        else:
+            def _rel_group(item):
+                """Clé de groupe : 1, 2, ou 3 (pour 3 et plus)."""
+                n = len(item['matching_rels'])
+                return n if n <= 2 else 3
 
-            f.write(f'  {type_label}/{ref}')
-            if hn or st:
-                f.write(f'  {hn} {st}'.rstrip())
-            f.write(f'\n    https://www.openstreetmap.org/{type_label}/{ref}\n')
-            f.write(f'    Relation(s) associatedStreet attendue(s) :\n')
-            for rid in item['matching_rels']:
-                rname = rel_tags_map.get(rid, {}).get('name', '(sans nom)')
-                f.write(
-                    f'      relation/{rid}  {rname}  '
-                    f'https://www.openstreetmap.org/relation/{rid}\n'
-                )
-            f.write('\n')
+            sorted_members = sorted(
+                missing_members,
+                key=lambda x: (
+                    _rel_group(x),
+                    x['addr_tags'].get('addr:street', ''),
+                    x['addr_tags'].get('addr:housenumber', ''),
+                ),
+            )
 
-        # --- Rôles invalides (NOUVEAU) -------------------------------------
+            _group_labels = {
+                1: '1 relation candidate',
+                2: '2 relations candidates',
+                3: '3 relations candidates ou plus',
+            }
+
+            for g_key, g_iter in groupby(sorted_members, key=_rel_group):
+                group_list = list(g_iter)
+                label = _group_labels[g_key]
+                f.write(f'  [{label} — {len(group_list)} objet(s)]\n\n')
+
+                for item in group_list:
+                    type_label = _TYPE_LABELS.get(item['type'], item['type'])
+                    ref = item['ref']
+                    tags = item['addr_tags']
+                    hn = tags.get('addr:housenumber', '')
+                    st = (tags.get('addr:street') or
+                          tags.get('addr:street_official') or '')
+
+                    f.write(f'  {type_label}/{ref}')
+                    if hn or st:
+                        f.write(f'  {hn} {st}'.rstrip())
+                    f.write(f'\n    https://www.openstreetmap.org/{type_label}/{ref}\n')
+                    f.write(f'    Relation(s) associatedStreet attendue(s) :\n')
+                    for rid in item['matching_rels']:
+                        rname = rel_tags_map.get(rid, {}).get('name', '(sans nom)')
+                        f.write(
+                            f'      relation/{rid}  {rname}  '
+                            f'https://www.openstreetmap.org/relation/{rid}\n'
+                        )
+                    f.write('\n')
+
+        # --- Rôles invalides ---------------------------------------------
         n_rels_bad_roles = len({i['rel_id'] for i in wrong_roles}) if wrong_roles else 0
         f.write(f'--- Membres avec rôle manquant ou invalide '
                 f'({len(wrong_roles)} membres dans {n_rels_bad_roles} relations) ---\n\n')
