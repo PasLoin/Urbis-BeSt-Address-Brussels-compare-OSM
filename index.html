@@ -506,12 +506,6 @@
   map.on('contextmenu', e => { if (!lassoActive) return; e.preventDefault(); finishLasso(); });
   document.getElementById('lasso-export').addEventListener('click', () => { if (lassoSelectedFeatures.length) downloadOsmXml(lassoSelectedFeatures, 'addresses-selection.osm'); });
   document.getElementById('lasso-cancel').addEventListener('click', () => { lassoPoints = []; lassoSelectedFeatures = []; updateLassoPolygon(); lassoPanel.style.display = 'none'; });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      if (lassoActive) toggleLasso();
-      else { lassoPoints = []; lassoSelectedFeatures = []; updateLassoPolygon(); lassoPanel.style.display = 'none'; }
-    }
-  });
 
   const URBIS_BASE  = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
   const SEARCH_MAX  = 7;
@@ -817,11 +811,6 @@
     }
   });
   srInput.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      if (srDropdown.classList.contains('open')) { srHide(); }
-      else { srBar.classList.remove('expanded'); srInput.value = ''; srClear.classList.remove('visible'); }
-      return;
-    }
     if (e.key === 'Enter') {
       if (srDropdown.classList.contains('open') && _activeItem >= 0 && _currentItems[_activeItem]) {
         e.preventDefault(); srSelect(_currentItems[_activeItem]);
@@ -859,6 +848,24 @@
   });
   map.on('click', () => { if (!lassoActive) srHide(); });
   srToggle.addEventListener('mouseenter', () => loadIndex().catch(() => {}), { once: true });
+
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (lassoActive) {
+      toggleLasso();
+      return;
+    }
+    lassoPoints = []; lassoSelectedFeatures = []; updateLassoPolygon(); lassoPanel.style.display = 'none';
+    if (srDropdown.classList.contains('open')) {
+      srHide();
+    } else if (srBar.classList.contains('expanded')) {
+      srBar.classList.remove('expanded');
+      srInput.value = '';
+      srClear.classList.remove('visible');
+      srHide();
+      if (_searchMarker) { _searchMarker.remove(); _searchMarker = null; }
+    }
+  });
 </script>
 </body>
 </html>
