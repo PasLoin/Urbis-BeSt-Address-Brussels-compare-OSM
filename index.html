@@ -444,12 +444,16 @@
   document.getElementById('f-missing-urbis').addEventListener('change', e => { filters.missing_in_urbis = e.target.checked; applyFilters(); });
   document.getElementById('f-missing-urbis-verified').addEventListener('change', e => { filters.missing_in_urbis_verified = e.target.checked; applyFilters(); });
 
-  let lassoActive = false, lassoPoints = [], lassoSelectedFeatures = [];
+  let lassoActive = false, lassoDrawing = false, lassoPoints = [], lassoSelectedFeatures = [];
+  let _lassoLastPx = null;
+  const LASSO_MIN_DIST = 10;
   const lassoBtn = document.getElementById('lasso-btn');
   const lassoPanel = document.getElementById('lasso-panel');
   const lassoCountEl = document.getElementById('lasso-count');
+
   function toggleLasso() {
     lassoActive = !lassoActive;
+    lassoDrawing = false;
     lassoBtn.classList.toggle('active', lassoActive);
     if (lassoActive) {
       lassoPoints = []; lassoSelectedFeatures = [];
@@ -484,7 +488,7 @@
   }
   const NON_EXPORTABLE = new Set(['missing_in_urbis', 'missing_in_urbis_verified']);
   function finishLasso() {
-    if (lassoPoints.length < 3) return;
+    if (lassoPoints.length < 3) { lassoPoints = []; updateLassoPolygon(); return; }
     const polyCoords = lassoPoints.map(p => [p.lng, p.lat]);
     const features = map.queryRenderedFeatures({ layers: ['addresses-points'] });
     const seen = new Set(); lassoSelectedFeatures = [];
@@ -497,15 +501,74 @@
     }
     lassoCountEl.textContent = lassoSelectedFeatures.length;
     lassoPanel.style.display = 'block';
-    lassoActive = false; lassoBtn.classList.remove('active');
+    lassoActive = false; lassoDrawing = false;
+    lassoBtn.classList.remove('active');
     map.getCanvas().style.cursor = ''; map.dragPan.enable();
   }
+
   lassoBtn.addEventListener('click', toggleLasso);
-  map.on('click', e => { if (!lassoActive) return; lassoPoints.push(e.lngLat); updateLassoPolygon(); });
-  map.on('dblclick', e => { if (!lassoActive) return; e.preventDefault(); finishLasso(); });
-  map.on('contextmenu', e => { if (!lassoActive) return; e.preventDefault(); finishLasso(); });
   document.getElementById('lasso-export').addEventListener('click', () => { if (lassoSelectedFeatures.length) downloadOsmXml(lassoSelectedFeatures, 'addresses-selection.osm'); });
   document.getElementById('lasso-cancel').addEventListener('click', () => { lassoPoints = []; lassoSelectedFeatures = []; updateLassoPolygon(); lassoPanel.style.display = 'none'; });
+
+  const lassoCanvas = map.getCanvas();
+
+  lassoCanvas.addEventListener('mousedown', e => {
+    if (!lassoActive || e.button !== 0) return;
+    e.preventDefault();
+    lassoDrawing = true;
+    lassoPoints = [];
+    _lassoLastPx = { x: e.offsetX, y: e.offsetY };
+    const ll = map.unproject([e.offsetX, e.offsetY]);
+    lassoPoints.push({ lng: ll.lng, lat: ll.lat });
+  });
+
+  lassoCanvas.addEventListener('mousemove', e => {
+    if (!lassoActive || !lassoDrawing) return;
+    const dx = e.offsetX - _lassoLastPx.x, dy = e.offsetY - _lassoLastPx.y;
+    if (dx * dx + dy * dy < LASSO_MIN_DIST * LASSO_MIN_DIST) return;
+    _lassoLastPx = { x: e.offsetX, y: e.offsetY };
+    const ll = map.unproject([e.offsetX, e.offsetY]);
+    lassoPoints.push({ lng: ll.lng, lat: ll.lat });
+    updateLassoPolygon();
+  });
+
+  document.addEventListener('mouseup', e => {
+    if (!lassoActive || !lassoDrawing || e.button !== 0) return;
+    lassoDrawing = false;
+    finishLasso();
+  });
+
+  lassoCanvas.addEventListener('touchstart', e => {
+    if (!lassoActive) return;
+    e.preventDefault();
+    lassoDrawing = true;
+    lassoPoints = [];
+    const touch = e.touches[0];
+    const rect = lassoCanvas.getBoundingClientRect();
+    _lassoLastPx = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+    const ll = map.unproject([_lassoLastPx.x, _lassoLastPx.y]);
+    lassoPoints.push({ lng: ll.lng, lat: ll.lat });
+  }, { passive: false });
+
+  lassoCanvas.addEventListener('touchmove', e => {
+    if (!lassoActive || !lassoDrawing) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = lassoCanvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left, y = touch.clientY - rect.top;
+    const dx = x - _lassoLastPx.x, dy = y - _lassoLastPx.y;
+    if (dx * dx + dy * dy < LASSO_MIN_DIST * LASSO_MIN_DIST) return;
+    _lassoLastPx = { x, y };
+    const ll = map.unproject([x, y]);
+    lassoPoints.push({ lng: ll.lng, lat: ll.lat });
+    updateLassoPolygon();
+  }, { passive: false });
+
+  document.addEventListener('touchend', e => {
+    if (!lassoActive || !lassoDrawing) return;
+    lassoDrawing = false;
+    finishLasso();
+  });
 
   const URBIS_BASE  = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
   const SEARCH_MAX  = 7;
@@ -852,9 +915,11 @@
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
     if (lassoActive) {
+      lassoDrawing = false;
       toggleLasso();
       return;
     }
+    lassoDrawing = false;
     lassoPoints = []; lassoSelectedFeatures = []; updateLassoPolygon(); lassoPanel.style.display = 'none';
     if (srDropdown.classList.contains('open')) {
       srHide();
