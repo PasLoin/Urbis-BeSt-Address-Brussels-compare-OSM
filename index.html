@@ -144,6 +144,9 @@
   #search-dropdown li.error-row:hover { background: none; }
   .sr-label { font-weight: 600; color: #1a1a1a; }
   .sr-sub   { font-size: 11.5px; color: #777; margin-top: 1px; }
+  .sr-ref   { font-size: 11px; margin-top: 2px; }
+  .sr-ref a { color: #4a90d9; text-decoration: none; }
+  .sr-ref a:hover { text-decoration: underline; }
   .sr-badge {
     display: inline-block; font-size: 9px; font-weight: 700;
     text-transform: uppercase; letter-spacing: .04em;
@@ -751,7 +754,7 @@
     const results = [];
     for (const group of (data.resultsList || [])) {
       for (const item of (group.result || [])) {
-        let label = '', sub = '', pos = null;
+        let label = '', sub = '', pos = null, refUrl = null;
         if (item.address) {
           const addr = item.address;
           const sn   = addr.hasStreetName?.streetname;
@@ -768,6 +771,8 @@
           const mun = _getName(item.municipality?.name);
           sub = mun || '';
           pos = _parsePos(sn) || _parsePos(item);
+          const streetId = sn?.objectIdentifier;
+          if (streetId) refUrl = `https://databrussels.be/id/streetname/${streetId}`;
         } else if (item.municipality) {
           label = _getName(item.municipality.name);
           pos   = _parsePos(item.municipality);
@@ -775,7 +780,7 @@
         if (!label || !pos) continue;
         try {
           const lngLat = await lambertToLngLat(pos.x, pos.y);
-          results.push({ label, sub, lngLat, score: srFuzzy(query, label), source: 'urbis' });
+          results.push({ label, sub, lngLat, score: srFuzzy(query, label), source: 'urbis', refUrl });
         } catch (_) {}
       }
     }
@@ -796,8 +801,12 @@
       const badge = r.source === 'osm'
         ? '<span class="sr-badge osm">OSM</span>'
         : '<span class="sr-badge">UrbIS</span>';
+      const refLink = r.refUrl
+        ? `<div class="sr-ref"><a href="${srEsc(r.refUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">databrussels.be ↗</a></div>`
+        : '';
       li.innerHTML = `<div class="sr-label">${srHL(r.label, query)}${badge}</div>`
-        + (r.sub ? `<div class="sr-sub">${srEsc(r.sub)}</div>` : '');
+        + (r.sub ? `<div class="sr-sub">${srEsc(r.sub)}</div>` : '')
+        + refLink;
       li.addEventListener('click', () => srSelect(r));
       li.addEventListener('mouseenter', () => {
         _activeItem = i;
@@ -822,11 +831,15 @@
     srHide();
     const [lon, lat] = result.lngLat;
     if (_searchMarker) { _searchMarker.remove(); _searchMarker = null; }
+    const refLink = result.refUrl
+      ? `<br><a href="${srEsc(result.refUrl)}" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#4a90d9">databrussels.be ↗</a>`
+      : '';
     _searchMarker = new maplibregl.Marker({ color: '#e74c3c' })
       .setLngLat([lon, lat])
       .setPopup(new maplibregl.Popup({ offset: 28, maxWidth: '240px' })
         .setHTML(`<strong>${srEsc(result.label)}</strong>`
-          + (result.sub ? `<br><span style="font-size:11px;color:#666">${srEsc(result.sub)}</span>` : '')))
+          + (result.sub ? `<br><span style="font-size:11px;color:#666">${srEsc(result.sub)}</span>` : '')
+          + refLink))
       .addTo(map).togglePopup();
     map.flyTo({ center: [lon, lat], zoom: SEARCH_ZOOM, duration: 600 });
   }
