@@ -723,6 +723,23 @@
       return { x: parseFloat(posStr[0]), y: parseFloat(posStr[1]) };
     return null;
   }
+
+  function _extractStreetId(sn, item) {
+    const candidates = [
+      sn?.objectIdentifier,
+      sn?.identifier,
+      sn?.id,
+      sn?.streetNameId,
+      sn?.streetId,
+      item?.objectIdentifier,
+      item?.identifier,
+    ];
+    for (const c of candidates) {
+      if (c != null && c !== '') return String(c);
+    }
+    return null;
+  }
+
   async function searchUrbis(query, maxR) {
     const m = query.match(/^(.*?)[,\s]+(\d+[a-zA-Z]?)$/);
     const streetPart = (m ? m[1] : query).trim();
@@ -771,8 +788,13 @@
           const mun = _getName(item.municipality?.name);
           sub = mun || '';
           pos = _parsePos(sn) || _parsePos(item);
-          const streetId = sn?.objectIdentifier;
-          if (streetId) refUrl = `https://databrussels.be/id/streetname/${streetId}`;
+          console.log('[UrbIS streetname raw]', JSON.stringify(item));
+          const streetId = _extractStreetId(sn, item);
+          if (streetId) {
+            refUrl = streetId.startsWith('http')
+              ? streetId
+              : `https://databrussels.be/id/streetname/${streetId}`;
+          }
         } else if (item.municipality) {
           label = _getName(item.municipality.name);
           pos   = _parsePos(item.municipality);
