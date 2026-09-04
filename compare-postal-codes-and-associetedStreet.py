@@ -91,7 +91,11 @@ GPKG_BASE_URL = ('https://urbisdownload.datastore.brussels/BeSt/FullDownload/GPK
                  'BeStBrussels_31370_GPKG_04000_{date}.zip')
 GEOJSON_DIR = 'postal_codes_geojson'
 BOUNDARY_RELATION_ID = 54094
-BOUNDARY_POLY_URL = f'https://polygons.openstreetmap.fr/get_poly.py?id={BOUNDARY_RELATION_ID}'
+# .poly (format Osmosis) de la RBC, hébergé dans le repo Osm-python-analyse_Belgium
+# (même source que le PBF) plutôt que le service live polygons.openstreetmap.fr —
+# plus stable/reproductible pour le CI.
+BOUNDARY_POLY_URL = ('https://raw.githubusercontent.com/PasLoin/'
+                      'Osm-python-analyse_Belgium/main/pbf_analyse/54094.poly')
 REGION_POLY_CACHE = f'region_{BOUNDARY_RELATION_ID}.poly'
 
 _TRANSFORMER = Transformer.from_crs("EPSG:31370", "EPSG:4326", always_xy=True)
@@ -198,31 +202,68 @@ class AllAddressCollector(osmium.SimpleHandler):
     Collecte TOUS les objets OSM portant à la fois addr:housenumber et
     addr:street (ou addr:street_official), sans filtrage par membership.
     Utilisé pour détecter les adresses absentes de leur relation
-    associatedStreet.
+    associatedStreet, ainsi que les rues sans relation candidate.
+
+    Capture aussi une position (lat/lon) pour les nodes et ways — nécessaire
+    pour filtrer le buffer hors Région (le PBF déborde de la RBC). Les
+    relations n'ont pas de position simple et restent à (None, None) : elles
+    ne sont alors PAS exclues par le filtre région (par prudence, on ne
+    peut pas prouver qu'elles sont hors zone).
     """
 
     def __init__(self):
         super().__init__()
         # (type_char, ref) -> dict de tous les tags addr:*
         self.addresses = {}
+        # (type_char, ref) -> (lat, lon) | (None, None)
+        self.positions = {}
 
-    def _collect(self, type_char, obj):
-        tags = {t.k: t.v for t in obj.tags}
+    def _collect(self, type_char, obj_id, tags_list, lat, lon):
+        tags = {t.k: t.v for t in tags_list}
         hn = tags.get('addr:housenumber')
         street = tags.get('addr:street') or tags.get('addr:street_official')
         if not hn or not street:
             return
         addr_tags = {k: v for k, v in tags.items() if k.startswith('addr:')}
-        self.addresses[(type_char, obj.id)] = addr_tags
+        key = (type_char, obj_id)
+        self.addresses[key] = addr_tags
+        self.positions[key] = (lat, lon)
 
     def node(self, n):
-        self._collect('n', n)
+        lat = lon = None
+        if n.location.valid():
+            lat, lon = n.location.lat, n.location.lon
+        self._collect('n', n.id, n.tags, lat, lon)
 
     def way(self, w):
-        self._collect('w', w)
+        if not w.tags.get('addr:housenumber'):
+            return
+        lat = lon = None
+        try:
+            coords = [(nd.location.lon, nd.location.lat)
+                      for nd in w.nodes if nd.location.valid()]
+            if len(coords) >= 2:
+                geom = None
+                if coords[0] == coords[-1] and len(coords) >= 4:
+                    try:
+                        geom = Polygon(coords)
+                        if not geom.is_valid:
+                            geom = geom.buffer(0)
+                        if geom.is_empty:
+                            geom = None
+                    except Exception:
+                        geom = None
+                if geom is None:
+                    geom = LineString(coords)
+                c = geom.centroid
+                if not c.is_empty:
+                    lat, lon = c.y, c.x
+        except Exception:
+            pass
+        self._collect('w', w.id, w.tags, lat, lon)
 
     def relation(self, r):
-        self._collect('r', r)
+        self._collect('r', r.id, r.tags, None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -338,15 +379,39 @@ def check_multi_membership(handler, pbf_path):
 def load_all_osm_addresses_with_tags(pbf_path):
     """
     Charge TOUS les objets OSM portant addr:housenumber + addr:street (ou
-    addr:street_official), avec tous leurs tags addr:*. Une seule passe PBF,
-    réutilisée par check_missing_members ET check_streets_without_relation.
+    addr:street_official), avec tous leurs tags addr:* et leur position.
+    Une seule passe PBF, réutilisée par check_missing_members ET
+    check_streets_without_relation.
+
+    Retourne (addresses, positions) :
+      addresses : {(type_char, ref): {tags addr:*}}
+      positions : {(type_char, ref): (lat, lon) | (None, None)}
     """
     print('[OSM] Collecte de toutes les adresses '
           '(addr:housenumber + addr:street)...', flush=True)
     collector = AllAddressCollector()
-    collector.apply_file(pbf_path)
+    collector.apply_file(pbf_path, locations=True)
     print(f'[OSM] {len(collector.addresses)} adresses trouvées', flush=True)
-    return collector.addresses
+    return collector.addresses, collector.positions
+
+
+def filter_addresses_to_region(all_addresses, positions, region_prep):
+    """
+    Retire de all_addresses les objets dont la position est connue ET hors
+    du polygone région (buffer du PBF). Les objets sans position connue
+    (relations, ways sans géométrie résolue) sont conservés par prudence.
+    """
+    kept, outside = {}, 0
+    for key, addr_tags in all_addresses.items():
+        lat, lon = positions.get(key, (None, None))
+        if lat is not None and lon is not None:
+            if not region_prep.covers(Point(lon, lat)):
+                outside += 1
+                continue
+        kept[key] = addr_tags
+    print(f'[REGION] {len(kept)}/{len(all_addresses)} adresses gardées '
+          f'({outside} hors Région, buffer du PBF)', flush=True)
+    return kept
 
 
 def check_missing_members(handler, all_addresses):
@@ -734,7 +799,14 @@ def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT,
     multi_membership = check_multi_membership(handler, pbf_path)
     print(f'[CHECK] {len(multi_membership)} adresses dans ≥2 associatedStreet distinctes')
 
-    all_addresses = load_all_osm_addresses_with_tags(pbf_path)
+    all_addresses, all_positions = load_all_osm_addresses_with_tags(pbf_path)
+
+    print('[REGION] Filtrage des adresses hors Région (buffer du PBF)...',
+          flush=True)
+    region_poly = fetch_region_polygon()
+    region_prep = prep(region_poly)
+    all_addresses = filter_addresses_to_region(
+        all_addresses, all_positions, region_prep)
 
     missing_members = check_missing_members(handler, all_addresses)
     print(f'[CHECK] {len(missing_members)} adresses absentes de leur associatedStreet')
@@ -761,7 +833,7 @@ def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT,
     write_streets_without_relation_report(
         streets_without_relation, streets_without_relation_output)
 
-    return build_member_postcode_map(handler, relations)
+    return build_member_postcode_map(handler, relations), region_poly
 
 
 # ===========================================================================
@@ -1092,7 +1164,7 @@ def _build_region_polygon(rings):
 
 
 def fetch_region_polygon():
-    """Récupère le polygone de la RBC depuis polygons.openstreetmap.fr (avec cache)."""
+    """Récupère le polygone de la RBC (.poly Osmosis, avec cache local)."""
     if os.path.isfile(REGION_POLY_CACHE):
         print(f'[REGION] Cache trouvé : {REGION_POLY_CACHE}', flush=True)
         with open(REGION_POLY_CACHE, 'r', encoding='utf-8') as f:
@@ -1656,7 +1728,7 @@ def build_report(mismatches, no_postal_zone, stats, best_date):
     return '\n'.join(L)
 
 
-def run_postal_code_check(pbf_path, member_postcode=None):
+def run_postal_code_check(pbf_path, member_postcode=None, region_poly=None):
     # 1. GPKG BeSt
     existing_gpkg = sorted(
         glob.glob('BeStBrussels_31370_GPKG_04000*.gpkg') +
@@ -1688,7 +1760,9 @@ def run_postal_code_check(pbf_path, member_postcode=None):
     postal_polygons_raw, relation_ids = build_postal_polygons(pbf_path)
 
     # 4. Polygone officiel de la Région de Bruxelles-Capitale
-    region_poly = fetch_region_polygon()
+    #    (réutilisé depuis la Partie 1 si déjà calculé, sinon recalculé ici)
+    if region_poly is None:
+        region_poly = fetch_region_polygon()
     region_prep = prep(region_poly)
 
     # 5. Filtrer les polygones CP : whitelist (BeSt) + clip à la Région
@@ -1843,10 +1917,11 @@ def main():
         print(f'[INFO] PBF déjà présent : {pbf_path}')
 
     print('\n========== PARTIE 1 : associatedStreet ==========\n', flush=True)
-    member_postcode = run_associated_streets_check(pbf_path)
+    member_postcode, region_poly = run_associated_streets_check(pbf_path)
 
     print('\n========== PARTIE 2 : codes postaux ==========\n', flush=True)
-    run_postal_code_check(pbf_path, member_postcode=member_postcode)
+    run_postal_code_check(pbf_path, member_postcode=member_postcode,
+                          region_poly=region_poly)
 
 
 if __name__ == '__main__':
