@@ -570,6 +570,37 @@ def write_associated_streets_report(relations, missing_issues, duplicates,
     print(f'[OK] Rapport écrit : {path}')
 
 
+def build_member_postcode_map(handler, relations):
+    """
+    Construit {(osm_type, osm_id): postcode} pour chaque objet membre d'au
+    moins une relation associatedStreet, à partir du addr:postcode de la
+    (ou des) relation(s) dont il est membre.
+
+    osm_type est le mot complet ('node'/'way'/'relation'), pour matcher le
+    format utilisé par AddressCollector (Partie 2) — alors que
+    handler.member_to_relations utilise le type_char ('n'/'w'/'r').
+
+    Si un objet est membre de plusieurs relations associatedStreet dont les
+    addr:postcode diffèrent (cas déjà signalé par check_multi_membership),
+    on ne peut rien affirmer de fiable : la valeur retournée est ''
+    (inconnu), pour ne jamais invalider un doublon à tort.
+    """
+    rel_id_to_postcode = {
+        rel['id']: rel['tags'].get('addr:postcode', '').strip()
+        for rel in relations
+    }
+
+    member_postcode = {}
+    for (type_char, ref), rel_ids in handler.member_to_relations.items():
+        postcodes = {rel_id_to_postcode.get(rid, '') for rid in rel_ids}
+        postcodes.discard('')
+        pc = next(iter(postcodes)) if len(postcodes) == 1 else ''
+        key = (_TYPE_LABELS.get(type_char, type_char), ref)
+        member_postcode[key] = pc
+
+    return member_postcode
+
+
 def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT):
     print(f'[OSM] Lecture des relations associatedStreet dans {pbf_path}...')
     handler = AssociatedStreetCollector()
@@ -600,6 +631,8 @@ def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT):
         missing_members, wrong_roles,
         output_path,
     )
+
+    return build_member_postcode_map(handler, relations)
 
 
 # ===========================================================================
@@ -1210,6 +1243,7 @@ class AddressCollector(osmium.SimpleHandler):
                 'street':          street,
                 'housenumber':     hn,
                 'housenumber_raw': housenumber_raw if is_multi else None,
+                'operator':        tags.get('operator'),
                 'lat':             lat,
                 'lon':             lon,
             }
@@ -1278,16 +1312,35 @@ def _haversine_m(lat1, lon1, lat2, lon2):
     return 2 * R * math.asin(math.sqrt(a))
 
 
-def check_duplicate_osm_addresses(osm_addresses):
+WATSON_OPERATOR = 'AS Watson Health & Beauty Benelux'
+
+
+def check_duplicate_osm_addresses(osm_addresses, member_postcode=None):
     """
     Détecte les adresses OSM en doublon : même (addr:street,
     addr:housenumber), normalisés, portés par ≥2 objets OSM DISTINCTS
     (node/way différents). Deux objets distincts avec la même adresse sont
-    TOUJOURS un doublon à corriger (fusion la plupart du temps) ; la
-    distance calculée dans le rapport ne sert qu'à indiquer si c'est un
-    doublon "proche" (objet non fusionné après import bâtiment, fusion
-    rapide) ou "éloigné" (à examiner avant fusion : un des deux objets est
-    peut-être mal placé).
+    un doublon à corriger (fusion la plupart du temps) ; la distance
+    calculée dans le rapport ne sert qu'à indiquer si c'est un doublon
+    "proche" (objet non fusionné après import bâtiment, fusion rapide) ou
+    "éloigné" (à examiner avant fusion : un des deux objets est peut-être
+    mal placé).
+
+    Filtre code postal (via associatedStreet) :
+    si les objets candidats sont chacun membres d'une relation
+    associatedStreet, et que ces relations ont des addr:postcode connus et
+    DIFFÉRENTS, alors ce ne sont pas des doublons — juste deux rues
+    homonymes dans des communes/CP différents (cas fréquent à Bruxelles).
+    On applique un clustering par compatibilité de CP (comme
+    check_duplicates en Partie 1) : deux objets restent dans le même groupe
+    sauf si leurs CP sont tous deux connus et différents.
+
+    Cas particulier "magasins" :
+    si un groupe de doublons contient un objet avec
+    operator="AS Watson Health & Beauty Benelux" (Kruidvat, ICI PARIS XL,
+    Trekpleister...), il est mis à part dans une liste séparée plutôt que
+    dans la liste générale — ces enseignes ont fréquemment plusieurs
+    caisses/comptoirs mappés séparément à la même adresse.
 
     NB : un même objet éclaté via addr:housenumber="24;30" produit deux
     entrées différentes (numéros "24" et "30") dans osm_addresses : elles
@@ -1295,52 +1348,98 @@ def check_duplicate_osm_addresses(osm_addresses):
     quand même par (osm_type, osm_id) au cas où un objet apparaîtrait
     plusieurs fois pour le même numéro.
 
-    Retourne un dict {(street_norm, housenumber_norm): [adresses...]}.
+    Retourne (duplicate_groups, store_duplicate_groups) : deux listes de
+    dicts {'street', 'housenumber', 'objects': [adresses...]}.
     """
+    member_postcode = member_postcode or {}
+
     groups = defaultdict(list)
     for addr in osm_addresses:
         key = (normalize(addr['street']), normalize(addr['housenumber']))
         groups[key].append(addr)
 
-    duplicates = {}
+    duplicate_groups = []
+    store_duplicate_groups = []
+
     for key, addrs in groups.items():
+        # 1 entrée par objet distinct
         seen = {}
         for a in addrs:
             obj_key = (a['osm_type'], a['osm_id'])
-            seen.setdefault(obj_key, a)  # 1 entrée par objet distinct
+            seen.setdefault(obj_key, a)
         distinct_addrs = list(seen.values())
-        if len(distinct_addrs) >= 2:
-            duplicates[key] = distinct_addrs
+        if len(distinct_addrs) < 2:
+            continue
 
-    return duplicates
+        # Sous-clustering par compatibilité de code postal (via membership
+        # associatedStreet) : union sauf conflit CP connu et différent.
+        n = len(distinct_addrs)
+        parent = list(range(n))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(x, y):
+            parent[find(x)] = find(y)
+
+        postcodes = [
+            member_postcode.get((a['osm_type'], a['osm_id']), '')
+            for a in distinct_addrs
+        ]
+        for i in range(n):
+            for j in range(i + 1, n):
+                if not _values_conflict(postcodes[i], postcodes[j]):
+                    union(i, j)
+
+        clusters = defaultdict(list)
+        for i in range(n):
+            clusters[find(i)].append(distinct_addrs[i])
+
+        for cluster in clusters.values():
+            if len(cluster) < 2:
+                continue
+            group = {
+                'street':      cluster[0]['street'],
+                'housenumber': cluster[0]['housenumber'],
+                'objects':     cluster,
+            }
+            is_watson = any(
+                (a.get('operator') or '').strip() == WATSON_OPERATOR
+                for a in cluster
+            )
+            if is_watson:
+                store_duplicate_groups.append(group)
+            else:
+                duplicate_groups.append(group)
+
+    return duplicate_groups, store_duplicate_groups
 
 
-def write_duplicate_addresses_report(duplicates, output_path):
+def write_duplicate_addresses_report(groups, output_path, title, intro_lines):
     today = date.today().isoformat()
-    total_objects = sum(len(v) for v in duplicates.values())
+    total_objects = sum(len(g['objects']) for g in groups)
 
     L = []
     L.append('=' * 72)
-    L.append('RAPPORT DES ADRESSES OSM EN DOUBLON')
+    L.append(title)
     L.append('Région de Bruxelles-Capitale')
     L.append('=' * 72)
     L.append(f'Date du rapport : {today}')
     L.append('')
-    L.append('Une adresse (addr:street + addr:housenumber, normalisés) portée')
-    L.append('par 2+ objets OSM distincts (node/way) est un doublon à')
-    L.append('corriger (fusion la plupart du temps). La distance indiquée')
-    L.append('ne sert qu\'à prioriser : proche (<~20m) = fusion probable,')
-    L.append('rapide ; éloignée = à examiner avant fusion, un des deux')
-    L.append('objets est peut-être mal placé.')
+    L.extend(intro_lines)
     L.append('')
-    L.append(f'Total : {len(duplicates)} adresse(s) en doublon, '
+    L.append(f'Total : {len(groups)} adresse(s) en doublon, '
               f'{total_objects} objets OSM concernés')
     L.append('')
 
-    for (street_norm, hn_norm), addrs in sorted(duplicates.items()):
-        street_display = addrs[0]['street']
-        hn_display = addrs[0]['housenumber']
-
+    groups_sorted = sorted(
+        groups, key=lambda g: (normalize(g['street']), normalize(g['housenumber']))
+    )
+    for g in groups_sorted:
+        addrs = g['objects']
         coords = [(a['lat'], a['lon']) for a in addrs]
         max_dist = 0.0
         for i in range(len(coords)):
@@ -1349,12 +1448,13 @@ def write_duplicate_addresses_report(duplicates, output_path):
                 max_dist = max(max_dist, d)
 
         L.append('-' * 72)
-        L.append(f'{street_display} {hn_display}  '
+        L.append(f'{g["street"]} {g["housenumber"]}  '
                   f'({len(addrs)} objets, distance max {max_dist:.0f} m)')
         for a in sorted(addrs, key=lambda x: (x['osm_type'], x['osm_id'])):
             ref = f'{a["osm_type"]}/{a["osm_id"]}'
             osm_url = f'https://www.openstreetmap.org/{a["osm_type"]}/{a["osm_id"]}'
-            L.append(f'    {ref:<14} lat={a["lat"]:.6f} lon={a["lon"]:.6f}  {osm_url}')
+            op = f'  operator={a["operator"]}' if a.get('operator') else ''
+            L.append(f'    {ref:<14} lat={a["lat"]:.6f} lon={a["lon"]:.6f}  {osm_url}{op}')
         L.append('')
 
     L.append('=' * 72)
@@ -1364,7 +1464,7 @@ def write_duplicate_addresses_report(duplicates, output_path):
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write('\n'.join(L))
 
-    print(f'[OK] Rapport doublons écrit : {output_path}')
+    print(f'[OK] Rapport écrit : {output_path}')
 
 
 def build_report(mismatches, no_postal_zone, stats, best_date):
@@ -1427,7 +1527,7 @@ def build_report(mismatches, no_postal_zone, stats, best_date):
     return '\n'.join(L)
 
 
-def run_postal_code_check(pbf_path):
+def run_postal_code_check(pbf_path, member_postcode=None):
     # 1. GPKG BeSt
     existing_gpkg = sorted(
         glob.glob('BeStBrussels_31370_GPKG_04000*.gpkg') +
@@ -1486,15 +1586,52 @@ def run_postal_code_check(pbf_path):
     print(f'[REGION] {len(osm_addresses)}/{len(osm_addresses_all)} adresses '
           f'gardées ({len(outside_region)} dans le buffer)', flush=True)
 
-    # 6ter. Doublons d'adresses OSM (même rue+numéro, ≥2 objets distincts)
+    # 6ter. Doublons d'adresses OSM (même rue+numéro, ≥2 objets distincts,
+    #       CP compatibles via associatedStreet ; magasins Watson à part)
     print('[DUPLICATES] Recherche des adresses en doublon dans OSM...',
           flush=True)
-    duplicate_addresses = check_duplicate_osm_addresses(osm_addresses)
-    dup_objects = sum(len(v) for v in duplicate_addresses.values())
-    print(f'[DUPLICATES] {len(duplicate_addresses)} adresses en doublon '
+    duplicate_groups, store_duplicate_groups = check_duplicate_osm_addresses(
+        osm_addresses, member_postcode=member_postcode)
+    dup_objects = sum(len(g['objects']) for g in duplicate_groups)
+    store_dup_objects = sum(len(g['objects']) for g in store_duplicate_groups)
+    print(f'[DUPLICATES] {len(duplicate_groups)} adresses en doublon '
           f'({dup_objects} objets OSM concernés)', flush=True)
+    print(f'[DUPLICATES] {len(store_duplicate_groups)} doublons magasins '
+          f'{WATSON_OPERATOR!r} ({store_dup_objects} objets OSM concernés)',
+          flush=True)
+
     dup_output_file = f'osm_duplicate_addresses_report_{date.today().isoformat()}.txt'
-    write_duplicate_addresses_report(duplicate_addresses, dup_output_file)
+    write_duplicate_addresses_report(
+        duplicate_groups, dup_output_file,
+        title='RAPPORT DES ADRESSES OSM EN DOUBLON',
+        intro_lines=[
+            'Une adresse (addr:street + addr:housenumber, normalisés) portée',
+            'par 2+ objets OSM distincts (node/way) est un doublon à',
+            'corriger (fusion la plupart du temps). La distance indiquée',
+            'ne sert qu\'à prioriser : proche (<~20m) = fusion probable,',
+            'rapide ; éloignée = à examiner avant fusion, un des deux',
+            'objets est peut-être mal placé.',
+            '',
+            'Exclu : les paires dont les deux objets sont membres de',
+            'relations associatedStreet avec des addr:postcode connus et',
+            'différents (rues homonymes dans des communes différentes).',
+        ],
+    )
+
+    store_dup_output_file = (
+        f'osm_duplicate_addresses_stores_report_{date.today().isoformat()}.txt')
+    write_duplicate_addresses_report(
+        store_duplicate_groups, store_dup_output_file,
+        title=f'RAPPORT DES DOUBLONS MAGASINS ({WATSON_OPERATOR})',
+        intro_lines=[
+            f'Doublons d\'adresse impliquant un objet operator=',
+            f'"{WATSON_OPERATOR}" (Kruidvat, ICI PARIS XL, Trekpleister...).',
+            'Traités à part car ces enseignes ont souvent plusieurs',
+            'caisses/comptoirs mappés séparément à la même adresse : à',
+            'vérifier au cas par cas avant fusion, ce n\'est pas toujours',
+            'une erreur.',
+        ],
+    )
 
     # 7. Analyse
     print('[ANALYSE] Calcul spatial et comparaison CP...', flush=True)
@@ -1577,10 +1714,10 @@ def main():
         print(f'[INFO] PBF déjà présent : {pbf_path}')
 
     print('\n========== PARTIE 1 : associatedStreet ==========\n', flush=True)
-    run_associated_streets_check(pbf_path)
+    member_postcode = run_associated_streets_check(pbf_path)
 
     print('\n========== PARTIE 2 : codes postaux ==========\n', flush=True)
-    run_postal_code_check(pbf_path)
+    run_postal_code_check(pbf_path, member_postcode=member_postcode)
 
 
 if __name__ == '__main__':
