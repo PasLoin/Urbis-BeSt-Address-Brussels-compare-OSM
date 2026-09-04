@@ -35,6 +35,8 @@ jobs:
           path: |
             postal_code_report_*.txt
             osm_duplicate_addresses_report_*.txt
+            osm_duplicate_addresses_stores_report_*.txt
             associated-streets-report.txt
+            streets-without-associatedStreet-report.txt
             postal_codes_geojson/**
           retention-days: 90
