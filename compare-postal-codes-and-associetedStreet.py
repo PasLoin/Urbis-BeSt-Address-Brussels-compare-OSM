@@ -24,7 +24,10 @@ Vérifications OSM combinées pour la Région de Bruxelles-Capitale.
 === Partie 2 : comparaison des codes postaux par adresse ===
   BeSt Address vs OpenStreetMap (calcul spatial point-in-polygon +
   matching spatial avec numéro normalisé).
+  - Doublons d'adresses OSM : addr:street + addr:housenumber (normalisés)
+    portés par ≥2 objets OSM distincts (node/way), avec distance entre eux.
   -> écrit : postal_code_report_YYYY-MM-DD.txt
+             osm_duplicate_addresses_report_YYYY-MM-DD.txt
              postal_codes_geojson/ (debug visuel)
 
 
@@ -34,6 +37,7 @@ import sys
 import os
 import glob
 import time
+import math
 import urllib.request
 import urllib.error
 import zipfile
@@ -1259,6 +1263,110 @@ def load_osm_addresses(pbf_path):
     return h.addresses
 
 
+# ---------------------------------------------------------------------------
+# Doublons d'adresses OSM (même rue + numéro portés par ≥2 objets distincts)
+# ---------------------------------------------------------------------------
+
+def _haversine_m(lat1, lon1, lat2, lon2):
+    """Distance approximative en mètres entre deux points lat/lon (WGS84)."""
+    R = 6371000.0
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = (math.sin(dphi / 2) ** 2 +
+         math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2)
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+def check_duplicate_osm_addresses(osm_addresses):
+    """
+    Détecte les adresses OSM en doublon : même (addr:street,
+    addr:housenumber), normalisés, portés par ≥2 objets OSM DISTINCTS
+    (node/way différents). Deux objets distincts avec la même adresse sont
+    TOUJOURS un doublon à corriger (fusion la plupart du temps) ; la
+    distance calculée dans le rapport ne sert qu'à indiquer si c'est un
+    doublon "proche" (objet non fusionné après import bâtiment, fusion
+    rapide) ou "éloigné" (à examiner avant fusion : un des deux objets est
+    peut-être mal placé).
+
+    NB : un même objet éclaté via addr:housenumber="24;30" produit deux
+    entrées différentes (numéros "24" et "30") dans osm_addresses : elles
+    ne se percutent donc pas ici, sauf coïncidence improbable. On déduplique
+    quand même par (osm_type, osm_id) au cas où un objet apparaîtrait
+    plusieurs fois pour le même numéro.
+
+    Retourne un dict {(street_norm, housenumber_norm): [adresses...]}.
+    """
+    groups = defaultdict(list)
+    for addr in osm_addresses:
+        key = (normalize(addr['street']), normalize(addr['housenumber']))
+        groups[key].append(addr)
+
+    duplicates = {}
+    for key, addrs in groups.items():
+        seen = {}
+        for a in addrs:
+            obj_key = (a['osm_type'], a['osm_id'])
+            seen.setdefault(obj_key, a)  # 1 entrée par objet distinct
+        distinct_addrs = list(seen.values())
+        if len(distinct_addrs) >= 2:
+            duplicates[key] = distinct_addrs
+
+    return duplicates
+
+
+def write_duplicate_addresses_report(duplicates, output_path):
+    today = date.today().isoformat()
+    total_objects = sum(len(v) for v in duplicates.values())
+
+    L = []
+    L.append('=' * 72)
+    L.append('RAPPORT DES ADRESSES OSM EN DOUBLON')
+    L.append('Région de Bruxelles-Capitale')
+    L.append('=' * 72)
+    L.append(f'Date du rapport : {today}')
+    L.append('')
+    L.append('Une adresse (addr:street + addr:housenumber, normalisés) portée')
+    L.append('par 2+ objets OSM distincts (node/way) est un doublon à')
+    L.append('corriger (fusion la plupart du temps). La distance indiquée')
+    L.append('ne sert qu\'à prioriser : proche (<~20m) = fusion probable,')
+    L.append('rapide ; éloignée = à examiner avant fusion, un des deux')
+    L.append('objets est peut-être mal placé.')
+    L.append('')
+    L.append(f'Total : {len(duplicates)} adresse(s) en doublon, '
+              f'{total_objects} objets OSM concernés')
+    L.append('')
+
+    for (street_norm, hn_norm), addrs in sorted(duplicates.items()):
+        street_display = addrs[0]['street']
+        hn_display = addrs[0]['housenumber']
+
+        coords = [(a['lat'], a['lon']) for a in addrs]
+        max_dist = 0.0
+        for i in range(len(coords)):
+            for j in range(i + 1, len(coords)):
+                d = _haversine_m(*coords[i], *coords[j])
+                max_dist = max(max_dist, d)
+
+        L.append('-' * 72)
+        L.append(f'{street_display} {hn_display}  '
+                  f'({len(addrs)} objets, distance max {max_dist:.0f} m)')
+        for a in sorted(addrs, key=lambda x: (x['osm_type'], x['osm_id'])):
+            ref = f'{a["osm_type"]}/{a["osm_id"]}'
+            osm_url = f'https://www.openstreetmap.org/{a["osm_type"]}/{a["osm_id"]}'
+            L.append(f'    {ref:<14} lat={a["lat"]:.6f} lon={a["lon"]:.6f}  {osm_url}')
+        L.append('')
+
+    L.append('=' * 72)
+    L.append('FIN DU RAPPORT')
+    L.append('=' * 72)
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(L))
+
+    print(f'[OK] Rapport doublons écrit : {output_path}')
+
+
 def build_report(mismatches, no_postal_zone, stats, best_date):
     today = date.today().isoformat()
     L = []
@@ -1377,6 +1485,16 @@ def run_postal_code_check(pbf_path):
             outside_region.append(addr)
     print(f'[REGION] {len(osm_addresses)}/{len(osm_addresses_all)} adresses '
           f'gardées ({len(outside_region)} dans le buffer)', flush=True)
+
+    # 6ter. Doublons d'adresses OSM (même rue+numéro, ≥2 objets distincts)
+    print('[DUPLICATES] Recherche des adresses en doublon dans OSM...',
+          flush=True)
+    duplicate_addresses = check_duplicate_osm_addresses(osm_addresses)
+    dup_objects = sum(len(v) for v in duplicate_addresses.values())
+    print(f'[DUPLICATES] {len(duplicate_addresses)} adresses en doublon '
+          f'({dup_objects} objets OSM concernés)', flush=True)
+    dup_output_file = f'osm_duplicate_addresses_report_{date.today().isoformat()}.txt'
+    write_duplicate_addresses_report(duplicate_addresses, dup_output_file)
 
     # 7. Analyse
     print('[ANALYSE] Calcul spatial et comparaison CP...', flush=True)
