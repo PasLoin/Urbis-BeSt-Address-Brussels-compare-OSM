@@ -15,9 +15,13 @@ Vérifications OSM combinées pour la Région de Bruxelles-Capitale.
     comme membre. Si plusieurs relations existent pour la même rue
     (doublons déjà signalés), l'adresse doit être membre d'au moins
     l'une d'elles.
+  - Rues sans relation candidate : adresses OSM (addr:street) pour
+    lesquelles AUCUNE relation associatedStreet n'existe (à la différence
+    des membres manquants ci-dessus, qui supposent qu'une relation existe).
   - Rôles invalides : membres d'une relation associatedStreet dont le
     rôle est absent ou différent de 'street' ou 'house'.
   -> écrit : associated-streets-report.txt
+             streets-without-associatedStreet-report.txt
 
 
 
@@ -26,9 +30,14 @@ Vérifications OSM combinées pour la Région de Bruxelles-Capitale.
   matching spatial avec numéro normalisé).
   - Doublons d'adresses OSM : addr:street + addr:housenumber (normalisés)
     portés par ≥2 objets OSM distincts (node/way), avec distance entre eux.
+    Exclut les paires dont le CP (via associatedStreet) diffère. Les
+    doublons impliquant un magasin operator="AS Watson Health & Beauty
+    Benelux" sont isolés dans un rapport séparé.
   -> écrit : postal_code_report_YYYY-MM-DD.txt
              osm_duplicate_addresses_report_YYYY-MM-DD.txt
+             osm_duplicate_addresses_stores_report_YYYY-MM-DD.txt
              postal_codes_geojson/ (debug visuel)
+
 
 
 """
@@ -75,6 +84,7 @@ OSM_PBF_URL = (
 HEADERS = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
 
 ASSOC_STREETS_OUTPUT = 'associated-streets-report.txt'
+STREETS_WITHOUT_RELATION_OUTPUT = 'streets-without-associatedStreet-report.txt'
 REQUIRED_TAGS = ('addr:city', 'addr:country', 'addr:postcode')
 
 GPKG_BASE_URL = ('https://urbisdownload.datastore.brussels/BeSt/FullDownload/GPKG/'
@@ -325,7 +335,21 @@ def check_multi_membership(handler, pbf_path):
     return results
 
 
-def check_missing_members(handler, pbf_path):
+def load_all_osm_addresses_with_tags(pbf_path):
+    """
+    Charge TOUS les objets OSM portant addr:housenumber + addr:street (ou
+    addr:street_official), avec tous leurs tags addr:*. Une seule passe PBF,
+    réutilisée par check_missing_members ET check_streets_without_relation.
+    """
+    print('[OSM] Collecte de toutes les adresses '
+          '(addr:housenumber + addr:street)...', flush=True)
+    collector = AllAddressCollector()
+    collector.apply_file(pbf_path)
+    print(f'[OSM] {len(collector.addresses)} adresses trouvées', flush=True)
+    return collector.addresses
+
+
+def check_missing_members(handler, all_addresses):
     """
     Vérifie que toutes les adresses OSM dont addr:street correspond (après
     normalisation) au name d'une relation associatedStreet existante sont
@@ -337,9 +361,7 @@ def check_missing_members(handler, pbf_path):
     """
     # nom normalisé → ensemble des relation IDs associées
     name_to_rel_ids = defaultdict(set)
-    rel_id_to_tags = {}
     for rel in handler.relations:
-        rel_id_to_tags[rel['id']] = rel['tags']
         name = rel['tags'].get('name', '').strip()
         if name:
             name_to_rel_ids[normalize(name)].add(rel['id'])
@@ -353,15 +375,8 @@ def check_missing_members(handler, pbf_path):
         for rel in handler.relations
     }
 
-    print('[OSM] Passe membres manquants : collecte de toutes les adresses...',
-          flush=True)
-    collector = AllAddressCollector()
-    collector.apply_file(pbf_path)
-    print(f'[OSM] {len(collector.addresses)} adresses '
-          f'(addr:housenumber + addr:street) trouvées', flush=True)
-
     results = []
-    for (type_char, ref), addr_tags in sorted(collector.addresses.items()):
+    for (type_char, ref), addr_tags in sorted(all_addresses.items()):
         street = (addr_tags.get('addr:street') or
                   addr_tags.get('addr:street_official') or '').strip()
         if not street:
@@ -369,7 +384,8 @@ def check_missing_members(handler, pbf_path):
 
         matching_rels = name_to_rel_ids.get(normalize(street), set())
         if not matching_rels:
-            continue  # aucune relation associatedStreet pour cette rue → pas une erreur
+            continue  # aucune relation associatedStreet pour cette rue
+                      # -> couvert par check_streets_without_relation
 
         key = (type_char, ref)
         is_member = any(key in rel_member_set.get(rid, set())
@@ -383,6 +399,106 @@ def check_missing_members(handler, pbf_path):
             })
 
     return results
+
+
+def check_streets_without_relation(handler, all_addresses):
+    """
+    Liste les rues (addr:street / addr:street_official, normalisées)
+    utilisées par des adresses OSM pour lesquelles AUCUNE relation
+    associatedStreet n'existe dans le PBF — donc aucune relation candidate
+    à rejoindre. Complémentaire de check_missing_members, qui lui suppose
+    qu'une relation existe déjà pour la rue en question.
+
+    NB : se base uniquement sur les noms de relations associatedStreet
+    présents dans le PBF (comparaison normalisée, accents/casse ignorés).
+    Ne tient pas compte des alias de rue (alt_name, etc. sur les highways) :
+    par définition, s'il n'existe aucune relation, il n'y a rien à
+    interroger pour retrouver un éventuel alias.
+
+    Retourne une liste de dicts, triée par nombre d'adresses décroissant :
+      {'street': nom affiché, 'count': n, 'addresses': [...]}
+    """
+    known_street_names = {
+        normalize(rel['tags'].get('name', '').strip())
+        for rel in handler.relations
+        if rel['tags'].get('name', '').strip()
+    }
+
+    by_street = defaultdict(list)
+    for (type_char, ref), addr_tags in all_addresses.items():
+        street = (addr_tags.get('addr:street') or
+                  addr_tags.get('addr:street_official') or '').strip()
+        if not street:
+            continue
+        norm = normalize(street)
+        if norm in known_street_names:
+            continue  # une relation associatedStreet existe pour cette rue
+
+        by_street[norm].append({
+            'type':      type_char,
+            'ref':       ref,
+            'addr_tags': addr_tags,
+        })
+
+    results = []
+    for norm, addrs in by_street.items():
+        display_street = (addrs[0]['addr_tags'].get('addr:street') or
+                          addrs[0]['addr_tags'].get('addr:street_official') or
+                          '').strip()
+        results.append({
+            'street':    display_street,
+            'count':     len(addrs),
+            'addresses': sorted(addrs, key=lambda a: (a['type'], a['ref'])),
+        })
+
+    results.sort(key=lambda r: (-r['count'], normalize(r['street'])))
+    return results
+
+
+def write_streets_without_relation_report(results, output_path):
+    today = date.today().isoformat()
+    total_addresses = sum(r['count'] for r in results)
+
+    L = []
+    L.append('=' * 72)
+    L.append('RAPPORT DES RUES SANS RELATION associatedStreet')
+    L.append('Région de Bruxelles-Capitale')
+    L.append('=' * 72)
+    L.append(f'Date du rapport : {today}')
+    L.append('')
+    L.append('Rues utilisées par des adresses OSM (addr:street /')
+    L.append('addr:street_official) pour lesquelles AUCUNE relation')
+    L.append('associatedStreet n\'existe dans OSM : il n\'y a ici aucune')
+    L.append('relation candidate à rejoindre (contrairement au rapport')
+    L.append('"membres manquants" dans associated-streets-report.txt, qui')
+    L.append('suppose qu\'une relation existe déjà). Selon le cas, il faut')
+    L.append('soit créer la relation associatedStreet (si la convention')
+    L.append('locale l\'exige pour cette commune), soit corriger addr:street')
+    L.append('(faute de frappe, variante non alignée sur le nom officiel).')
+    L.append('')
+    L.append(f'Total : {len(results)} rue(s) sans relation, '
+              f'{total_addresses} adresse(s) concernée(s)')
+    L.append('')
+
+    for r in results:
+        L.append('-' * 72)
+        L.append(f'{r["street"]}  ({r["count"]} adresse(s))')
+        for a in r['addresses']:
+            type_label = _TYPE_LABELS.get(a['type'], a['type'])
+            hn = a['addr_tags'].get('addr:housenumber', '')
+            ref = f'{type_label}/{a["ref"]}'
+            L.append(f'    {ref:<16} n°{hn}  '
+                      f'https://www.openstreetmap.org/{type_label}/{a["ref"]}')
+        L.append('')
+
+    L.append('=' * 72)
+    L.append('FIN DU RAPPORT')
+    L.append('=' * 72)
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(L))
+
+    print(f'[OK] Rapport écrit : {output_path}')
 
 
 def check_wrong_roles(handler, pbf_path):
@@ -601,7 +717,8 @@ def build_member_postcode_map(handler, relations):
     return member_postcode
 
 
-def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT):
+def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT,
+                                  streets_without_relation_output=STREETS_WITHOUT_RELATION_OUTPUT):
     print(f'[OSM] Lecture des relations associatedStreet dans {pbf_path}...')
     handler = AssociatedStreetCollector()
     handler.apply_file(pbf_path)
@@ -617,8 +734,17 @@ def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT):
     multi_membership = check_multi_membership(handler, pbf_path)
     print(f'[CHECK] {len(multi_membership)} adresses dans ≥2 associatedStreet distinctes')
 
-    missing_members = check_missing_members(handler, pbf_path)
+    all_addresses = load_all_osm_addresses_with_tags(pbf_path)
+
+    missing_members = check_missing_members(handler, all_addresses)
     print(f'[CHECK] {len(missing_members)} adresses absentes de leur associatedStreet')
+
+    streets_without_relation = check_streets_without_relation(handler, all_addresses)
+    streets_without_relation_addr_count = sum(
+        r['count'] for r in streets_without_relation)
+    print(f'[CHECK] {len(streets_without_relation)} rues sans relation '
+          f'associatedStreet candidate '
+          f'({streets_without_relation_addr_count} adresses concernées)')
 
     wrong_roles = check_wrong_roles(handler, pbf_path)
     print(f'[CHECK] {len(wrong_roles)} membres avec rôle manquant ou invalide')
@@ -631,6 +757,9 @@ def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT):
         missing_members, wrong_roles,
         output_path,
     )
+
+    write_streets_without_relation_report(
+        streets_without_relation, streets_without_relation_output)
 
     return build_member_postcode_map(handler, relations)
 
