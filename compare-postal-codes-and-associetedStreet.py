@@ -204,11 +204,10 @@ class AllAddressCollector(osmium.SimpleHandler):
     Utilisé pour détecter les adresses absentes de leur relation
     associatedStreet, ainsi que les rues sans relation candidate.
 
-    Capture aussi une position (lat/lon) pour les nodes et ways — nécessaire
-    pour filtrer le buffer hors Région (le PBF déborde de la RBC). Les
-    relations n'ont pas de position simple et restent à (None, None) : elles
-    ne sont alors PAS exclues par le filtre région (par prudence, on ne
-    peut pas prouver qu'elles sont hors zone).
+    Capture aussi une position (lat/lon) pour les nodes et ways. Pour les
+    relations (multipolygones), la position n'est pas résolue ici : voir
+    resolve_relation_positions, qui fait une passe ciblée sur les ways
+    membres.
     """
 
     def __init__(self):
@@ -217,6 +216,8 @@ class AllAddressCollector(osmium.SimpleHandler):
         self.addresses = {}
         # (type_char, ref) -> (lat, lon) | (None, None)
         self.positions = {}
+        # rel_id -> [way_id, ...] pour les relations avec addr:* et ≥1 way membre
+        self.relation_way_members = {}
 
     def _collect(self, type_char, obj_id, tags_list, lat, lon):
         tags = {t.k: t.v for t in tags_list}
@@ -263,7 +264,80 @@ class AllAddressCollector(osmium.SimpleHandler):
         self._collect('w', w.id, w.tags, lat, lon)
 
     def relation(self, r):
+        way_ids = [m.ref for m in r.members if m.type == 'w']
+        if way_ids and r.tags.get('addr:housenumber') and \
+           (r.tags.get('addr:street') or r.tags.get('addr:street_official')):
+            self.relation_way_members[r.id] = way_ids
         self._collect('r', r.id, r.tags, None, None)
+
+
+class WayPositionCollector(osmium.SimpleHandler):
+    """
+    Passe PBF ciblée : calcule le centroïde (lat, lon) de chaque way dont
+    l'id figure dans wanted_way_ids. Utilisé pour approximer la position
+    des relations multipolygones (bâtiment + cour intérieure, etc.) via
+    leurs ways membres.
+    """
+
+    def __init__(self, wanted_way_ids):
+        super().__init__()
+        self.wanted = wanted_way_ids
+        self.positions = {}
+
+    def way(self, w):
+        if w.id not in self.wanted:
+            return
+        try:
+            coords = [(nd.location.lon, nd.location.lat)
+                      for nd in w.nodes if nd.location.valid()]
+            if len(coords) < 2:
+                return
+            geom = None
+            if coords[0] == coords[-1] and len(coords) >= 4:
+                try:
+                    geom = Polygon(coords)
+                    if not geom.is_valid:
+                        geom = geom.buffer(0)
+                    if geom.is_empty:
+                        geom = None
+                except Exception:
+                    geom = None
+            if geom is None:
+                geom = LineString(coords)
+            c = geom.centroid
+            if not c.is_empty:
+                self.positions[w.id] = (c.y, c.x)
+        except Exception:
+            pass
+
+
+def resolve_relation_positions(pbf_path, relation_way_members):
+    """
+    relation_way_members : {rel_id: [way_id, ...]}. Fait une passe PBF
+    ciblée sur ces ways (WayPositionCollector), puis moyenne les centroïdes
+    des ways membres de chaque relation pour approximer sa position.
+
+    Retourne {rel_id: (lat, lon)} — absent si aucun way membre n'a pu être
+    localisé.
+    """
+    if not relation_way_members:
+        return {}
+
+    all_way_ids = {wid for wids in relation_way_members.values() for wid in wids}
+    print(f'[OSM] Passe position : {len(all_way_ids)} way(s) membre(s) de '
+          f'{len(relation_way_members)} relation(s) à localiser...', flush=True)
+    collector = WayPositionCollector(all_way_ids)
+    collector.apply_file(pbf_path, locations=True)
+
+    rel_positions = {}
+    for rel_id, way_ids in relation_way_members.items():
+        pts = [collector.positions[w] for w in way_ids if w in collector.positions]
+        if pts:
+            rel_positions[rel_id] = (
+                sum(p[0] for p in pts) / len(pts),
+                sum(p[1] for p in pts) / len(pts),
+            )
+    return rel_positions
 
 
 # ---------------------------------------------------------------------------
@@ -380,8 +454,10 @@ def load_all_osm_addresses_with_tags(pbf_path):
     """
     Charge TOUS les objets OSM portant addr:housenumber + addr:street (ou
     addr:street_official), avec tous leurs tags addr:* et leur position.
-    Une seule passe PBF, réutilisée par check_missing_members ET
-    check_streets_without_relation.
+    Une seule passe PBF pour les nodes/ways, réutilisée par
+    check_missing_members ET check_streets_without_relation. Les relations
+    (multipolygones) ont leur position résolue via une passe ciblée
+    supplémentaire sur leurs ways membres (resolve_relation_positions).
 
     Retourne (addresses, positions) :
       addresses : {(type_char, ref): {tags addr:*}}
@@ -392,7 +468,19 @@ def load_all_osm_addresses_with_tags(pbf_path):
     collector = AllAddressCollector()
     collector.apply_file(pbf_path, locations=True)
     print(f'[OSM] {len(collector.addresses)} adresses trouvées', flush=True)
-    return collector.addresses, collector.positions
+
+    positions = dict(collector.positions)
+    if collector.relation_way_members:
+        rel_positions = resolve_relation_positions(
+            pbf_path, collector.relation_way_members)
+        for rel_id, pos in rel_positions.items():
+            positions[('r', rel_id)] = pos
+        unresolved = len(collector.relation_way_members) - len(rel_positions)
+        if unresolved:
+            print(f'[OSM] {unresolved} relation(s) sans position résolue '
+                  f'(aucun way membre localisé)', flush=True)
+
+    return collector.addresses, positions
 
 
 def filter_addresses_to_region(all_addresses, positions, region_prep):
@@ -532,14 +620,8 @@ def write_streets_without_relation_report(results, output_path):
     L.append(f'Date du rapport : {today}')
     L.append('')
     L.append('Rues utilisées par des adresses OSM (addr:street /')
-    L.append('addr:street_official) pour lesquelles AUCUNE relation')
-    L.append('associatedStreet n\'existe dans OSM : il n\'y a ici aucune')
-    L.append('relation candidate à rejoindre (contrairement au rapport')
-    L.append('"membres manquants" dans associated-streets-report.txt, qui')
-    L.append('suppose qu\'une relation existe déjà). Selon le cas, il faut')
-    L.append('soit créer la relation associatedStreet (si la convention')
-    L.append('locale l\'exige pour cette commune), soit corriger addr:street')
-    L.append('(faute de frappe, variante non alignée sur le nom officiel).')
+    L.append('addr:street_official) pour lesquelles aucune relation')
+    L.append('associatedStreet du même nom (normalisé) n\'existe dans le PBF.')
     L.append('')
     L.append(f'Total : {len(results)} rue(s) sans relation, '
               f'{total_addresses} adresse(s) concernée(s)')
@@ -1808,16 +1890,12 @@ def run_postal_code_check(pbf_path, member_postcode=None, region_poly=None):
         duplicate_groups, dup_output_file,
         title='RAPPORT DES ADRESSES OSM EN DOUBLON',
         intro_lines=[
-            'Une adresse (addr:street + addr:housenumber, normalisés) portée',
-            'par 2+ objets OSM distincts (node/way) est un doublon à',
-            'corriger (fusion la plupart du temps). La distance indiquée',
-            'ne sert qu\'à prioriser : proche (<~20m) = fusion probable,',
-            'rapide ; éloignée = à examiner avant fusion, un des deux',
-            'objets est peut-être mal placé.',
+            'Adresses (addr:street + addr:housenumber, normalisés) portées',
+            'par 2+ objets OSM distincts (node/way).',
             '',
             'Exclu : les paires dont les deux objets sont membres de',
             'relations associatedStreet avec des addr:postcode connus et',
-            'différents (rues homonymes dans des communes différentes).',
+            'différents.',
         ],
     )
 
@@ -1827,12 +1905,8 @@ def run_postal_code_check(pbf_path, member_postcode=None, region_poly=None):
         store_duplicate_groups, store_dup_output_file,
         title=f'RAPPORT DES DOUBLONS MAGASINS ({WATSON_OPERATOR})',
         intro_lines=[
-            f'Doublons d\'adresse impliquant un objet operator=',
-            f'"{WATSON_OPERATOR}" (Kruidvat, ICI PARIS XL, Trekpleister...).',
-            'Traités à part car ces enseignes ont souvent plusieurs',
-            'caisses/comptoirs mappés séparément à la même adresse : à',
-            'vérifier au cas par cas avant fusion, ce n\'est pas toujours',
-            'une erreur.',
+            f'Doublons impliquant un objet avec operator='
+            f'"{WATSON_OPERATOR}".',
         ],
     )
 
