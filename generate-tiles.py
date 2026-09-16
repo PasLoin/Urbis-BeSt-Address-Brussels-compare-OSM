@@ -6,6 +6,8 @@ import subprocess
 import tempfile
 import unicodedata
 import json
+import math
+from collections import defaultdict
 import pandas as pd
 import geopandas as gpd
 import osmium
@@ -17,6 +19,7 @@ PBF_FILE = 'brussels_capital_region-latest.osm.pbf'
 BOUNDARY_RELATION = 54094
 BOUNDARY_URL = f'https://polygons.openstreetmap.fr/get_geojson.py?id={BOUNDARY_RELATION}&params=0'
 HEADERS = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
+MAX_MATCH_DIST_M = 500
 
 def normalize(s):
     if not s: return ''
@@ -44,6 +47,7 @@ class AddressHandler(osmium.SimpleHandler):
         self.street_name_groups = []
         # For reverse lookup: store details of OSM addresses with coordinates
         self.address_details = {}  # (norm_street, norm_nbr) -> {'street': raw, 'nbr': raw, 'lat': float, 'lon': float}
+        self.address_coords = defaultdict(list)
 
     def _collect_street_variants(self, tags):
         variants = set()
@@ -91,6 +95,7 @@ class AddressHandler(osmium.SimpleHandler):
                         # Store details for reverse lookup (keep first occurrence)
                         if lat is not None and lon is not None:
                             key = (part, nbr_n)
+                            self.address_coords[key].append((lat, lon))
                             if key not in self.address_details:
                                 self.address_details[key] = {
                                     'street': raw_street,
@@ -158,9 +163,15 @@ def load_osm(pbf_path):
     for group in handler.street_name_groups:
         for name in group:
             alias_map.setdefault(name, set()).update(group - {name})
-    return handler.addresses, handler.verified_absent, alias_map, handler.address_details
+    return handler.addresses, handler.verified_absent, alias_map, handler.address_details, handler.address_coords
 
-def get_status(streetfr, streetnl, nbr, osm_addrs, verified_absent, alias_map):
+def _dist_m(lat1, lon1, lat2, lon2):
+    x = (lon2 - lon1) * 111320 * math.cos(math.radians((lat1 + lat2) / 2))
+    y = (lat2 - lat1) * 111320
+    return math.hypot(x, y)
+
+def get_status(streetfr, streetnl, nbr, osm_addrs, verified_absent, alias_map,
+               osm_coords=None, lat=None, lon=None):
     if not nbr: return 'missing'
     nbr_n = normalize(nbr)
     base = set()
@@ -169,7 +180,15 @@ def get_status(streetfr, streetnl, nbr, osm_addrs, verified_absent, alias_map):
     expanded = set(base)
     for s in base:
         expanded.update(alias_map.get(s, set()))
-    if any((s, nbr_n) in osm_addrs for s in expanded): return 'ok'
+    matched = [(s, nbr_n) for s in expanded if (s, nbr_n) in osm_addrs]
+    if matched:
+        if osm_coords is None or lat is None or lon is None:
+            return 'ok'
+        positions = [p for k in matched for p in osm_coords.get(k, ())]
+        if not positions:
+            return 'ok'
+        if any(_dist_m(lat, lon, plat, plon) <= MAX_MATCH_DIST_M for plat, plon in positions):
+            return 'ok'
     if any((s, nbr_n) in verified_absent for s in expanded): return 'verified_absent'
     return 'missing'
 
@@ -213,10 +232,10 @@ def find_osm_only(gdf, osm_addrs, osm_details, alias_map, boundary=None):
     return osm_only
 
 def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
-    osm_addrs, verified_absent, alias_map, osm_details = set(), set(), {}, {}
+    osm_addrs, verified_absent, alias_map, osm_details, osm_coords = set(), set(), {}, {}, {}
     osm_loaded = False
     if pbf_path and os.path.isfile(pbf_path):
-        osm_addrs, verified_absent, alias_map, osm_details = load_osm(pbf_path)
+        osm_addrs, verified_absent, alias_map, osm_details, osm_coords = load_osm(pbf_path)
         osm_loaded = True
         print(f'[OSM] {len(osm_addrs)} adresses, {len(verified_absent)} vérifiées absentes, {len(osm_details)} avec coordonnées')
     else:
@@ -233,7 +252,10 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
     gdf['status'] = gdf.apply(
         lambda row: get_status(
             row['STRNAMEFRE'], row['STRNAMEDUT'], row['POLICENUM'],
-            osm_addrs, verified_absent, alias_map
+            osm_addrs, verified_absent, alias_map,
+            osm_coords,
+            row.geometry.y if row.geometry is not None and not row.geometry.is_empty else None,
+            row.geometry.x if row.geometry is not None and not row.geometry.is_empty else None,
         ), axis=1
     )
 
