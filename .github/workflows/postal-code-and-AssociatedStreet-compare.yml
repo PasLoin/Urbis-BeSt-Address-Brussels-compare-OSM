@@ -1,7 +1,7 @@
 name: Postal Code Comparison (BeSt vs OSM) and AssociatedStreet check
 on:
   schedule:
-    - cron: '15 15 15 * *'
+    - cron: '10 15 * * *'
   workflow_dispatch:
 jobs:
   compare-postal-codes:
@@ -39,4 +39,4 @@ jobs:
             associated-streets-report.txt
             streets-without-associatedStreet-report.txt
             postal_codes_geojson/**
-          retention-days: 90
+          retention-days: 3
