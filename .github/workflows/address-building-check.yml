@@ -1,0 +1,48 @@
+name: Address on wrong building check (UrbIS vs OSM)
+on:
+  schedule:
+    - cron: '0 7 * * 3'
+  workflow_dispatch:
+jobs:
+  address-building-check:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUNBUFFERED: '1'
+      WB_OVERLAP_OK: '0.5'
+      WB_POINT_TOL: '2.0'
+      WB_FAR: '25'
+      WB_SEARCH_RADIUS: '300'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libosmium2-dev libgdal-dev python3-dev
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install geopandas pyogrio osmium shapely pyproj numpy
+
+      - name: Run address / building check
+        run: python3 compare-address-buildings.py
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wrong-building-report-${{ github.run_id }}
+          path: |
+            wrong_building_report_*.txt
+            wrong_building_report_*.csv
+            wrong_building_geojson/**
+          if-no-files-found: warn
+          retention-days: 7
