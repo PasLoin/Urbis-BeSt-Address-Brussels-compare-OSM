@@ -37,6 +37,7 @@ REGION_POLY_URL = ('https://raw.githubusercontent.com/PasLoin/'
 REGION_POLY_CACHE = 'region_54094.poly'
 HEADERS = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
 GEOJSON_DIR = 'wrong_building_geojson'
+SKIP_NOTE_KEYWORD = 'urbisadm'
 
 TO_L72 = Transformer.from_crs('EPSG:4326', 'EPSG:31370', always_xy=True)
 TO_WGS = Transformer.from_crs('EPSG:31370', 'EPSG:4326', always_xy=True)
@@ -292,6 +293,7 @@ class OsmHandler(osmium.SimpleHandler):
         self.wkb = WKBFactory()
         self.objects = []
         self.street_groups = []
+        self.skipped = 0
 
     def _variants(self, tags):
         variants = set()
@@ -306,6 +308,10 @@ class OsmHandler(osmium.SimpleHandler):
         hn = tags.get('addr:housenumber')
         if not hn:
             return None
+        for t in tags:
+            if (t.k == 'note' or t.k.startswith('note:')) and SKIP_NOTE_KEYWORD in t.v.lower():
+                self.skipped += 1
+                return None
         streets = [tags.get(k) for k in ('addr:street', 'addr:street_official', 'addr:place')]
         streets = [s for s in streets if s]
         if not streets:
@@ -369,6 +375,7 @@ def load_osm(pbf):
         for name in group:
             alias[name].update(group - {name})
     print(f'[OSM] {len(h.objects)} objets adresse, {len(alias)} noms de rue avec variantes')
+    print(f'[OSM] {h.skipped} objets ignorés (note contenant « {SKIP_NOTE_KEYWORD} »)')
     return h.objects, alias
 
 
