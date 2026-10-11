@@ -52,6 +52,7 @@ import urllib.error
 import zipfile
 import unicodedata
 import re
+import json
 from collections import defaultdict
 from datetime import datetime, date, timedelta
 from itertools import groupby
@@ -85,6 +86,8 @@ HEADERS = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
 
 ASSOC_STREETS_OUTPUT = 'associated-streets-report.txt'
 STREETS_WITHOUT_RELATION_OUTPUT = 'streets-without-associatedStreet-report.txt'
+ASSOC_STREETS_GEOJSON_OUTPUT = 'associated-streets-report.geojson'
+STREETS_WITHOUT_RELATION_GEOJSON_OUTPUT = 'streets-without-associatedStreet-report.geojson'
 REQUIRED_TAGS = ('addr:city', 'addr:country', 'addr:postcode')
 
 GPKG_BASE_URL = ('https://urbisdownload.datastore.brussels/BeSt/FullDownload/GPKG/'
@@ -309,6 +312,24 @@ class WayPositionCollector(osmium.SimpleHandler):
                 self.positions[w.id] = (c.y, c.x)
         except Exception:
             pass
+
+
+class NodePositionCollector(osmium.SimpleHandler):
+
+    def __init__(self, wanted_node_ids):
+        super().__init__()
+        self.wanted = wanted_node_ids
+        self.positions = {}
+
+    def node(self, n):
+        if n.id in self.wanted and n.location.valid():
+            self.positions[n.id] = (n.location.lat, n.location.lon)
+
+
+def collect_node_positions(pbf_path, node_ids):
+    collector = NodePositionCollector(node_ids)
+    collector.apply_file(pbf_path)
+    return collector.positions
 
 
 def resolve_relation_positions(pbf_path, relation_way_members):
@@ -833,6 +854,85 @@ def write_associated_streets_report(relations, missing_issues, duplicates,
     print(f'[OK] Rapport écrit : {path}')
 
 
+def _point_feature(type_char, ref, positions, check, addr_tags, rel_ids=None,
+                   rel_tags_map=None):
+    lat, lon = positions.get((type_char, ref), (None, None))
+    if lat is None or lon is None:
+        return None
+    type_label = _TYPE_LABELS.get(type_char, type_char)
+    props = {
+        'addr:housenumber': addr_tags.get('addr:housenumber', ''),
+        'addr:street': (addr_tags.get('addr:street') or
+                        addr_tags.get('addr:street_official') or ''),
+        'check': check,
+        'url': f'https://www.openstreetmap.org/{type_label}/{ref}',
+    }
+    if rel_ids:
+        rel_tags_map = rel_tags_map or {}
+        props['relation_count'] = len(rel_ids)
+        props['relation_ids'] = ';'.join(str(r) for r in rel_ids)
+        props['relation_names'] = ';'.join(
+            rel_tags_map.get(r, {}).get('name', '(sans nom)') for r in rel_ids)
+        if len(rel_ids) == 1:
+            props['source:url'] = f'https://www.openstreetmap.org/relation/{rel_ids[0]}'
+        else:
+            for n, r in enumerate(rel_ids, 1):
+                props[f'source{n}:url'] = f'https://www.openstreetmap.org/relation/{r}'
+    return {
+        'type': 'Feature',
+        'geometry': {'type': 'Point',
+                     'coordinates': [round(lon, 7), round(lat, 7)]},
+        'properties': props,
+    }
+
+
+def _write_feature_collection(features, path):
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump({'type': 'FeatureCollection', 'features': features},
+                  f, ensure_ascii=False, separators=(',', ':'))
+
+
+def write_associated_streets_geojson(multi_membership, missing_members,
+                                      wrong_roles, rel_tags_map, positions,
+                                      path=ASSOC_STREETS_GEOJSON_OUTPUT):
+    entries = (
+        [('missing_member', i, i['matching_rels']) for i in missing_members] +
+        [('multi_membership', i, i['relation_ids']) for i in multi_membership] +
+        [('wrong_role', i, [i['rel_id']]) for i in wrong_roles]
+    )
+    features = []
+    skipped = 0
+    for check, item, rel_ids in entries:
+        feat = _point_feature(item['type'], item['ref'], positions, check,
+                              item.get('addr_tags', {}), rel_ids, rel_tags_map)
+        if feat is None:
+            skipped += 1
+        else:
+            features.append(feat)
+
+    _write_feature_collection(features, path)
+    print(f'[OK] GeoJSON écrit : {path} ({len(features)} points, '
+          f'{skipped} objet(s) sans position ignoré(s))')
+
+
+def write_streets_without_relation_geojson(results, positions,
+                                           path=STREETS_WITHOUT_RELATION_GEOJSON_OUTPUT):
+    features = []
+    skipped = 0
+    for r in results:
+        for a in r['addresses']:
+            feat = _point_feature(a['type'], a['ref'], positions,
+                                  'street_without_relation', a['addr_tags'])
+            if feat is None:
+                skipped += 1
+            else:
+                features.append(feat)
+
+    _write_feature_collection(features, path)
+    print(f'[OK] GeoJSON écrit : {path} ({len(features)} points, '
+          f'{skipped} objet(s) sans position ignoré(s))')
+
+
 def build_member_postcode_map(handler, relations):
     """
     Construit {(osm_type, osm_id): postcode} pour chaque objet membre d'au
@@ -914,6 +1014,26 @@ def run_associated_streets_check(pbf_path, output_path=ASSOC_STREETS_OUTPUT,
 
     write_streets_without_relation_report(
         streets_without_relation, streets_without_relation_output)
+
+    unlocated = {(i['type'], i['ref']) for i in wrong_roles
+                 if (i['type'], i['ref']) not in all_positions}
+    unlocated_nodes = {ref for t, ref in unlocated if t == 'n'}
+    unlocated_ways = {ref for t, ref in unlocated if t == 'w'}
+    if unlocated_nodes:
+        for ref, pos in collect_node_positions(pbf_path, unlocated_nodes).items():
+            all_positions[('n', ref)] = pos
+    if unlocated_ways:
+        way_collector = WayPositionCollector(unlocated_ways)
+        way_collector.apply_file(pbf_path, locations=True)
+        for ref, pos in way_collector.positions.items():
+            all_positions[('w', ref)] = pos
+
+    write_associated_streets_geojson(
+        multi_membership, missing_members, wrong_roles,
+        rel_tags_map, all_positions)
+
+    write_streets_without_relation_geojson(
+        streets_without_relation, all_positions)
 
     return build_member_postcode_map(handler, relations), region_poly
 
