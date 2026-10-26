@@ -40,4 +40,8 @@ Changes are listed in [changelog.md](changelog.md) (in French).
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+The code in this repository is under the MIT license, see [LICENSE](LICENSE).
+
+The data has its own licenses. OpenStreetMap data is © OpenStreetMap contributors and available under the [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/). UrbIS data from the Brussels-Capital Region is released under [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
+
+The generated files committed here are derived from OpenStreetMap and therefore fall under the ODbL, not the MIT license. `search-index.json` is built from the OSM extract. `addresses.pmtiles.gz` combines UrbIS addresses with a status computed from OSM data.
