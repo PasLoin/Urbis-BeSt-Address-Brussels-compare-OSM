@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-30
+
+### Ajouté
+
+- **Fond de Carte** - ZinnekeTiles (legacy sans poi et tram/metro) + ZinekeTiles Noir & Blanc en plus de Osm Carto
+
 ## 2026-06-23
  
 ### Ajouté
