@@ -355,7 +355,7 @@
 
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol('pmtiles', protocol.tile);
-  const p = new pmtiles.PMTiles('addresses.pmtiles.gz');
+  const p = new pmtiles.PMTiles('addresses.pmtiles');
   protocol.add(p);
   const STATUS_COLOR = [
     'match', ['get', 'status'],
@@ -405,7 +405,7 @@
     }
   }
   map.on('load', () => {
-    map.addSource('addresses-source', { type: 'vector', url: 'pmtiles://addresses.pmtiles.gz' });
+    map.addSource('addresses-source', { type: 'vector', url: 'pmtiles://addresses.pmtiles' });
     map.addLayer({
       id: 'addresses-points', type: 'circle',
       source: 'addresses-source', 'source-layer': 'addresses',
