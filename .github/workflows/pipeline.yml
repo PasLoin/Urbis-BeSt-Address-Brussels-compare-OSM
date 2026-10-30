@@ -36,18 +36,14 @@ jobs:
         run: |
           python3 build-search-index.py brussels_capital_region-latest.osm.pbf
 
-      - name: Rename PMTiles
-        run: |
-          mv addresses.pmtiles addresses.pmtiles.gz
-
       - name: Check generated files
-        run: ls -la *.pmtiles* search-index.json || echo "Fichiers manquants"
+        run: ls -la addresses.pmtiles search-index.json || echo "Fichiers manquants"
 
       - name: Commit and Push
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add addresses.pmtiles.gz version.json search-index.json
+          git add addresses.pmtiles version.json search-index.json
           git diff --quiet && git diff --staged --quiet || git commit -m "Update addresses + search index - $(date +'%Y-%m-%d')"
           BRANCH="${GITHUB_REF_NAME:-main}"
           git pull --rebase origin "$BRANCH"
