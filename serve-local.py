@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-## cp addresses.pmtiles addresses.pmtiles.gz 
 from __future__ import annotations
 
 import os
