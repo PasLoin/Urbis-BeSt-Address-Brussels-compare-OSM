@@ -437,7 +437,8 @@
   const BASEMAPS = [
     { id: 'osm', label: 'OSM Carto', short: 'OSM Carto', thumb: THUMB_TILE, style: OSM_CARTO_STYLE },
     { id: 'zinneke', label: 'ZinnekeTiles', short: 'Zinneke', thumb: THUMB_TILE, thumbFilter: 'saturate(.55) brightness(1.08) contrast(.95)',
-      url: 'https://pasloin.github.io/ZinnekeTiles/style.json', attribution: ZINNEKE_ATTRIBUTION },
+      url: 'https://pasloin.github.io/ZinnekeTiles/style.json', attribution: ZINNEKE_ATTRIBUTION,
+      hideSources: ['public_transport'], hideLayers: [] },
     { id: 'nb', label: 'ZinnekeTiles Noir & Blanc', short: 'Zinneke N&B', thumb: THUMB_TILE, thumbFilter: 'grayscale(1) contrast(1.3) brightness(1.1)',
       url: 'https://pasloin.github.io/ZinnekeTiles/style.nb.json', attribution: ZINNEKE_ATTRIBUTION }
   ];
@@ -453,6 +454,15 @@
     const res = await fetch(bm.url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const style = await res.json();
+    const hideSources = new Set(bm.hideSources || []);
+    const hideLayers = bm.hideLayers || [];
+    const isHidden = layer => hideSources.has(layer.source) || hideLayers.some(pattern =>
+      pattern.endsWith('*') ? layer.id.startsWith(pattern.slice(0, -1)) : layer.id === pattern);
+    style.layers = (style.layers || []).filter(layer => !isHidden(layer));
+    const usedSources = new Set(style.layers.map(layer => layer.source).filter(Boolean));
+    for (const id of Object.keys(style.sources || {})) {
+      if (!usedSources.has(id)) delete style.sources[id];
+    }
     for (const src of Object.values(style.sources || {})) {
       if (src.url && /\.pmtiles$/.test(src.url)) src.url = 'pmtiles://' + new URL(src.url, bm.url).href;
       if (bm.attribution) src.attribution = bm.attribution;
