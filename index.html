@@ -438,7 +438,7 @@
     { id: 'osm', label: 'OSM Carto', short: 'OSM Carto', thumb: THUMB_TILE, style: OSM_CARTO_STYLE },
     { id: 'zinneke', label: 'ZinnekeTiles', short: 'Zinneke', thumb: THUMB_TILE, thumbFilter: 'saturate(.55) brightness(1.08) contrast(.95)',
       url: 'https://pasloin.github.io/ZinnekeTiles/style.json', attribution: ZINNEKE_ATTRIBUTION,
-      hideSources: ['public_transport'], hideLayers: [] },
+      hideSources: ['public_transport'], hideLayers: ['railway-tram*', 'railway-subway*', 'railway-tunnel-tram', 'railway-tunnel-subway'] },
     { id: 'nb', label: 'ZinnekeTiles Noir & Blanc', short: 'Zinneke N&B', thumb: THUMB_TILE, thumbFilter: 'grayscale(1) contrast(1.3) brightness(1.1)',
       url: 'https://pasloin.github.io/ZinnekeTiles/style.nb.json', attribution: ZINNEKE_ATTRIBUTION }
   ];
