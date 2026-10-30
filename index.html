@@ -434,14 +434,16 @@
 
   const THUMB_TILE = 'https://tile.openstreetmap.org/16/33560/21984.png';
   const ZINNEKE_ATTRIBUTION = '<a href="https://github.com/PasLoin/ZinnekeTiles" target="_blank">ZinnekeTiles</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>';
+  const ZINNEKE_BASE = 'https://pasloin.github.io/ZinnekeTiles/';
   const BASEMAPS = [
     { id: 'osm', label: 'OSM Carto', short: 'OSM Carto', thumb: THUMB_TILE, style: OSM_CARTO_STYLE },
-    { id: 'zinneke', label: 'ZinnekeTiles', short: 'Zinneke', thumb: THUMB_TILE, thumbFilter: 'saturate(.55) brightness(1.08) contrast(.95)',
-      url: 'https://pasloin.github.io/ZinnekeTiles/style.json', attribution: ZINNEKE_ATTRIBUTION,
+    { id: 'zinneke', label: 'ZinnekeTiles', short: 'Zinneke', thumb: ZINNEKE_BASE + 'assets/img/basemap-zinneke.png',
+      url: ZINNEKE_BASE + 'style.json', attribution: ZINNEKE_ATTRIBUTION,
       hideSources: ['public_transport'], hideLayers: ['railway-tram*', 'railway-subway*', 'railway-tunnel-tram', 'railway-tunnel-subway'] },
-    { id: 'nb', label: 'ZinnekeTiles Noir & Blanc', short: 'Zinneke N&B', thumb: THUMB_TILE, thumbFilter: 'grayscale(1) contrast(1.3) brightness(1.1)',
-      url: 'https://pasloin.github.io/ZinnekeTiles/style.nb.json', attribution: ZINNEKE_ATTRIBUTION }
+    { id: 'nb', label: 'ZinnekeTiles Noir & Blanc', short: 'Zinneke N&B', thumb: ZINNEKE_BASE + 'assets/img/basemap-nb.png',
+      url: ZINNEKE_BASE + 'style.nb.json', attribution: ZINNEKE_ATTRIBUTION }
   ];
+  
   const OVERLAY_SOURCES = ['addresses-source', 'lasso-source'];
   const BASEMAP_STORAGE_KEY = 'urbis-osm-basemap';
   const basemapStyleCache = {};
