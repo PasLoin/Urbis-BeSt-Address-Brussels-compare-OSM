@@ -10,7 +10,7 @@ import {
   statusDot
 } from '../../js/statuses.js';
 import { initialFilterState, filterExpression } from '../../js/filters.js';
-import { loadDict, useLang, availableLangs } from './helpers.mjs';
+import { loadDict, i18nFor, availableLangs } from './helpers.mjs';
 
 test('les codes de statut sont uniques et correspondent aux tuiles', () => {
   const codes = STATUSES.map(s => s.code);
@@ -52,13 +52,10 @@ test('chaque cl\u00e9 de statut existe dans les dictionnaires', () => {
 });
 
 test('statusLabel suit la langue courante', () => {
-  useLang('fr');
-  assert.equal(statusLabel('missing'), 'Manquante dans OSM');
-  useLang('en');
-  assert.equal(statusLabel('missing'), 'Missing from OSM');
-  useLang('nl');
-  assert.equal(statusLabel('missing'), 'Ontbreekt in OSM');
-  assert.equal(statusLabel('inconnu'), 'inconnu');
+  assert.equal(statusLabel('missing', i18nFor('fr')), 'Manquante dans OSM');
+  assert.equal(statusLabel('missing', i18nFor('en')), 'Missing from OSM');
+  assert.equal(statusLabel('missing', i18nFor('nl')), 'Ontbreekt in OSM');
+  assert.equal(statusLabel('inconnu', i18nFor('fr')), 'inconnu');
 });
 
 test('statusDot utilise la couleur du statut', () => {

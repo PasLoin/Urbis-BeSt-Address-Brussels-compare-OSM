@@ -1,70 +1,119 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createI18n, setI18n, t, currentLang, currentLocale } from '../../js/i18n.js';
+import { createI18n, setI18n, getI18n, i18nFromDocument } from '../../js/i18n.js';
 import { suggestedLang, redirectTarget, primaryBrowserLang } from '../../js/lang.js';
 import { generateOsmXml } from '../../js/osm-export.js';
 import { dataLang, localStreet } from '../../js/data-lang.js';
 import { buildUrbisUrl, urbisLanguages, searchAcrossLanguages, streetNameUrl } from '../../js/search.js';
 import { localizedDatabrusselsUrl } from '../../js/databrussels.js';
-import { useLang } from './helpers.mjs';
+import { i18nFor, LANGUAGES, availableLangs } from './helpers.mjs';
 
+const BASE = { lang: 'fr', locale: 'fr-BE', dataLang: 'fr', timeZone: 'Europe/Brussels' };
 const DICT = {
   greeting: 'Bonjour {name}',
   items: { one: '{count} \u00e9l\u00e9ment', other: '{count} \u00e9l\u00e9ments' }
 };
 
 test('t remplace les variables et garde celles qui manquent', () => {
-  const i18n = createI18n('fr', DICT);
+  const i18n = createI18n({ ...BASE, dict: DICT });
   assert.equal(i18n.t('greeting', { name: 'Bruxelles' }), 'Bonjour Bruxelles');
   assert.equal(i18n.t('greeting'), 'Bonjour {name}');
 });
 
-test('une cl\u00e9 inconnue est rendue telle quelle', () => {
-  assert.equal(createI18n('fr', DICT).t('absente'), 'absente');
+test('une cl\u00e9 inconnue est rendue telle quelle et signal\u00e9e une seule fois', () => {
+  const reported = [];
+  const i18n = createI18n({ ...BASE, dict: DICT, onMissing: (key, lang) => reported.push(`${lang}:${key}`) });
+  assert.equal(i18n.t('absente'), 'absente');
+  assert.equal(i18n.t('absente'), 'absente');
+  assert.equal(i18n.t('greeting', { name: 'x' }), 'Bonjour x');
+  assert.deepEqual(reported, ['fr:absente']);
+  assert.equal(createI18n({ ...BASE, dict: DICT }).t('absente'), 'absente');
 });
 
 test('les pluriels suivent les r\u00e8gles de chaque langue', () => {
-  const fr = createI18n('fr', DICT);
+  const fr = createI18n({ ...BASE, dict: DICT });
   assert.equal(fr.t('items', { count: 0 }), '0 \u00e9l\u00e9ment');
   assert.equal(fr.t('items', { count: 1 }), '1 \u00e9l\u00e9ment');
   assert.equal(fr.t('items', { count: 2 }), '2 \u00e9l\u00e9ments');
-  const en = createI18n('en', { items: { one: '{count} item', other: '{count} items' } });
+  const en = createI18n({ lang: 'en', locale: 'en-GB', dataLang: 'fr', timeZone: 'Europe/Brussels', dict: { items: { one: '{count} item', other: '{count} items' } } });
   assert.equal(en.t('items', { count: 0 }), '0 items');
   assert.equal(en.t('items', { count: 1 }), '1 item');
 });
 
-test('la langue courante pilote t, la locale et la langue des donn\u00e9es', () => {
-  setI18n(createI18n('en', { hello: 'Hello' }));
-  assert.equal(t('hello'), 'Hello');
-  assert.equal(currentLang(), 'en');
-  assert.equal(currentLocale(), 'en-GB');
-  assert.equal(dataLang(), 'fr');
-  setI18n(createI18n('nl', {}));
+test('une instance est fig\u00e9e', () => {
+  const i18n = createI18n({ ...BASE, dict: DICT });
+  assert.ok(Object.isFrozen(i18n));
+});
+
+test('l\u2019instance de l\u2019application refuse d\u2019\u00eatre lue avant initialisation', () => {
+  setI18n(null);
+  assert.throws(() => getI18n(), /setI18n/);
+  assert.throws(() => dataLang(), /setI18n/);
+  const nl = i18nFor('nl');
+  setI18n(nl);
+  assert.equal(getI18n(), nl);
   assert.equal(dataLang(), 'nl');
-  assert.equal(currentLocale(), 'nl-BE');
-  assert.deepEqual(localStreet({ STRNAMEFRE: 'Rue de la Loi', STRNAMEDUT: 'Wetstraat' }), { primary: 'Wetstraat', secondary: 'Rue de la Loi' });
   assert.equal(buildUrbisUrl('Wetstraat 16').searchParams.get('searchLanguage'), 'nl');
+  setI18n(null);
 });
 
-test('le pluriel du lasso existe en fran\u00e7ais et en anglais', () => {
-  useLang('fr');
-  assert.equal(t('lasso.selected', { count: 1 }), 'adresse s\u00e9lectionn\u00e9e');
-  assert.equal(t('lasso.selected', { count: 3 }), 'adresses s\u00e9lectionn\u00e9es');
-  useLang('en');
-  assert.equal(t('lasso.selected', { count: 1 }), 'address selected');
-  assert.equal(t('lasso.selected', { count: 0 }), 'addresses selected');
+test('chaque langue d\u00e9clar\u00e9e fournit locale, langue des donn\u00e9es et fuseau', () => {
+  for (const lang of availableLangs()) {
+    const i18n = i18nFor(lang);
+    assert.equal(i18n.lang, lang);
+    assert.equal(i18n.locale, LANGUAGES.languages[lang].locale);
+    assert.ok(['fr', 'nl'].includes(i18n.dataLang));
+    assert.equal(i18n.timeZone, LANGUAGES.timeZone);
+  }
 });
 
-test('l\u2019export .osm est identique quelle que soit la langue', () => {
+test('i18nFromDocument lit la configuration pos\u00e9e sur la page', () => {
+  const doc = {
+    documentElement: { lang: 'nl', dataset: { locale: 'nl-BE', dataLang: 'nl', timeZone: 'Europe/Brussels' } },
+    getElementById: id => (id === 'i18n-dict' ? { textContent: '{"hello":"Hallo"}' } : null)
+  };
+  const i18n = i18nFromDocument(doc, { warnMissing: false });
+  assert.equal(i18n.lang, 'nl');
+  assert.equal(i18n.locale, 'nl-BE');
+  assert.equal(i18n.dataLang, 'nl');
+  assert.equal(i18n.t('hello'), 'Hallo');
+});
+
+test('les langues des donn\u00e9es viennent de la configuration, pas d\u2019un \u00e9tat global', () => {
+  assert.equal(i18nFor('en').dataLang, 'fr');
+  assert.equal(i18nFor('nl').dataLang, 'nl');
+  assert.deepEqual(localStreet({ STRNAMEFRE: 'Rue de la Loi', STRNAMEDUT: 'Wetstraat' }, i18nFor('nl').dataLang), { primary: 'Wetstraat', secondary: 'Rue de la Loi' });
+  assert.equal(buildUrbisUrl('Wetstraat 16', i18nFor('nl').dataLang).searchParams.get('searchLanguage'), 'nl');
+});
+
+test('le pluriel du lasso existe dans chaque langue', () => {
+  const fr = i18nFor('fr');
+  assert.equal(fr.t('lasso.selected', { count: 1 }), 'adresse s\u00e9lectionn\u00e9e');
+  assert.equal(fr.t('lasso.selected', { count: 3 }), 'adresses s\u00e9lectionn\u00e9es');
+  const en = i18nFor('en');
+  assert.equal(en.t('lasso.selected', { count: 1 }), 'address selected');
+  assert.equal(en.t('lasso.selected', { count: 0 }), 'addresses selected');
+  const nl = i18nFor('nl');
+  assert.equal(nl.t('lasso.selected', { count: 1 }), 'adres geselecteerd');
+  assert.equal(nl.t('lasso.selected', { count: 0 }), 'adressen geselecteerd');
+  assert.equal(nl.t('lasso.selected', { count: 4 }), 'adressen geselecteerd');
+});
+
+test('l\u2019export .osm ne d\u00e9pend d\u2019aucune langue', () => {
   const features = [{
     properties: { STRNAMEFRE: 'Rue de la Loi', STRNAMEDUT: 'Wetstraat', POLICENUM: '16', INSPIRE_ID: 'X/1' },
     lng: 4.3685,
     lat: 50.8466
   }];
-  useLang('fr');
-  const fr = generateOsmXml(features);
-  useLang('en');
-  assert.equal(generateOsmXml(features), fr);
+  setI18n(null);
+  assert.equal(generateOsmXml(features), generateOsmXml(features));
+  assert.match(generateOsmXml(features), /Rue de la Loi - Wetstraat/);
+});
+
+test('le g\u00e9ocodeur UrbIS essaie la langue des donn\u00e9es puis l\u2019autre', () => {
+  assert.deepEqual(urbisLanguages(i18nFor('nl').dataLang), ['nl', 'fr']);
+  assert.deepEqual(urbisLanguages(i18nFor('fr').dataLang), ['fr', 'nl']);
+  assert.deepEqual(urbisLanguages(i18nFor('en').dataLang), ['fr', 'nl']);
 });
 
 test('seule la langue principale du navigateur d\u00e9clenche le bandeau', () => {
@@ -84,22 +133,6 @@ test('la redirection n\u2019a lieu que depuis la racine et sur choix m\u00e9mori
   assert.equal(redirectTarget({ ...base, isRoot: true, savedChoice: null }), null);
   assert.equal(redirectTarget({ ...base, isRoot: true, savedChoice: 'nl' }), null);
   assert.equal(redirectTarget({ pageLang: 'en', available: ['fr', 'en'], isRoot: false, savedChoice: 'fr' }), null);
-});
-
-test('le pluriel du lasso existe en n\u00e9erlandais', () => {
-  useLang('nl');
-  assert.equal(t('lasso.selected', { count: 1 }), 'adres geselecteerd');
-  assert.equal(t('lasso.selected', { count: 0 }), 'adressen geselecteerd');
-  assert.equal(t('lasso.selected', { count: 4 }), 'adressen geselecteerd');
-});
-
-test('le g\u00e9ocodeur UrbIS essaie la langue des donn\u00e9es puis l\u2019autre', () => {
-  useLang('nl');
-  assert.deepEqual(urbisLanguages(), ['nl', 'fr']);
-  useLang('fr');
-  assert.deepEqual(urbisLanguages(), ['fr', 'nl']);
-  useLang('en');
-  assert.deepEqual(urbisLanguages(), ['fr', 'nl']);
 });
 
 test('le bandeau propose le n\u00e9erlandais aux navigateurs n\u00e9erlandophones', () => {
@@ -145,8 +178,7 @@ test('le lien databrussels suit la langue de la page', () => {
   assert.equal(localizedDatabrusselsUrl(raw, 'fr'), 'https://databrussels.be/fr/id/streetname/1679/1');
   assert.equal(localizedDatabrusselsUrl(raw, 'en'), 'https://databrussels.be/en/id/streetname/1679/1');
   assert.equal(localizedDatabrusselsUrl('https://databrussels.be/fr/id/streetname/1679/1', 'nl'), 'https://databrussels.be/nl/id/streetname/1679/1');
-  useLang('nl');
-  assert.equal(localizedDatabrusselsUrl(raw), 'https://databrussels.be/nl/id/streetname/1679/1');
+  assert.equal(localizedDatabrusselsUrl(raw, i18nFor('nl').lang), 'https://databrussels.be/nl/id/streetname/1679/1');
 });
 
 test('un lien qui n\u2019est pas databrussels reste inchang\u00e9', () => {
