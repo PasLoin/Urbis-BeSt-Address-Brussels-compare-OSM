@@ -1,6 +1,7 @@
 import { escapeHtml } from './html.js';
 import { fuzzyScore, highlight, searchIndex, splitQuery } from './search-match.js';
 import { DATA_LANG, pickName } from './data-lang.js';
+import { siteUrl } from './paths.js';
 
 const URBIS_BASE = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
 const SEARCH_MAX = 7;
@@ -135,7 +136,7 @@ export function initSearch(map, { isLassoActive }) {
       indexCallbacks.push({ ok, fail });
       if (indexLoading) return;
       indexLoading = true;
-      fetch('search-index.json')
+      fetch(siteUrl('search-index.json'))
         .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then(data => { index = data; indexCallbacks.forEach(cb => cb.ok(data)); indexCallbacks = []; })
         .catch(err => { indexLoading = false; indexCallbacks.forEach(cb => cb.fail(err)); indexCallbacks = []; });
