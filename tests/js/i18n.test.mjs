@@ -4,7 +4,8 @@ import { createI18n, setI18n, t, currentLang, currentLocale } from '../../js/i18
 import { suggestedLang, redirectTarget, primaryBrowserLang } from '../../js/lang.js';
 import { generateOsmXml } from '../../js/osm-export.js';
 import { dataLang, localStreet } from '../../js/data-lang.js';
-import { buildUrbisUrl, urbisLanguages, searchAcrossLanguages, localizedDatabrusselsUrl, streetNameUrl } from '../../js/search.js';
+import { buildUrbisUrl, urbisLanguages, searchAcrossLanguages, streetNameUrl } from '../../js/search.js';
+import { localizedDatabrusselsUrl } from '../../js/databrussels.js';
 import { useLang } from './helpers.mjs';
 
 const DICT = {

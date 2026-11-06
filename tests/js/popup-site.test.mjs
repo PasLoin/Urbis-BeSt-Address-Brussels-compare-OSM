@@ -15,7 +15,7 @@ const ADDRESS = {
   ZIPCODE: '1000',
   MUNNAMEFRE: 'Bruxelles',
   MUNNAMEDUT: 'Brussel',
-  INSPIRE_ID: 'X/1234567',
+  INSPIRE_ID: 'https://databrussels.be/id/address/158114',
   status: 'missing'
 };
 
@@ -27,7 +27,7 @@ test('le popup affiche le statut traduit et les noms FR puis NL', () => {
   assert.match(html, /<strong>Rue de la Loi 16<\/strong><br>\s*<small>Wetstraat 16<\/small>/);
   assert.match(html, /1000 Bruxelles/);
   assert.match(html, /title="Copier l&#39;ID"/);
-  assert.match(html, /href="https:\/\/databrussels\.be\/id\/address\/1234567"/);
+  assert.match(html, /href="https:\/\/databrussels\.be\/fr\/id\/address\/158114"/);
   assert.match(html, /id="osm-dl-copy-1"/);
 });
 
@@ -37,6 +37,7 @@ test('en anglais, le popup est traduit et garde les noms FR puis NL', () => {
   assert.match(html, /<strong>Status:<\/strong>/);
   assert.match(html, /Missing from OSM/);
   assert.match(html, /<strong>INSPIRE:<\/strong>/);
+  assert.match(html, /href="https:\/\/databrussels\.be\/en\/id\/address\/158114"/);
   assert.match(html, /<strong>Rue de la Loi 16<\/strong><br>\s*<small>Wetstraat 16<\/small>/);
   assert.match(html, /1000 Bruxelles/);
   assert.doesNotMatch(html, /Statut|copier/);
@@ -50,6 +51,8 @@ test('en n\u00e9erlandais, le popup met la rue et la commune en n\u00e9erlandais
   assert.match(html, /<strong>Wetstraat 16<\/strong><br>\s*<small>Rue de la Loi 16<\/small>/);
   assert.match(html, /1000 Brussel/);
   assert.match(html, /title="ID kopi\u00ebren"/);
+  assert.match(html, /href="https:\/\/databrussels\.be\/nl\/id\/address\/158114"/);
+  assert.match(html, /class="inspire-link">158114</);
 });
 
 test('en n\u00e9erlandais, une adresse OSM sans nom n\u00e9erlandais reste lisible', () => {
