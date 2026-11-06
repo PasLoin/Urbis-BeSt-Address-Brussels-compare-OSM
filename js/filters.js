@@ -1,4 +1,5 @@
 import { STATUSES } from './statuses.js';
+import { t } from './i18n.js';
 
 export const ADDRESS_LAYER = 'addresses-points';
 
@@ -37,7 +38,7 @@ export function initFilters(map, container = document.getElementById('filters'))
     const dot = document.createElement('span');
     dot.className = 'dot';
     dot.style.background = status.color;
-    label.append(input, dot, document.createTextNode(status.label));
+    label.append(input, dot, document.createTextNode(t(status.labelKey)));
     return label;
   }));
 

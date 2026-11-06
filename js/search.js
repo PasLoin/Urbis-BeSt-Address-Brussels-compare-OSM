@@ -1,6 +1,7 @@
 import { escapeHtml } from './html.js';
 import { fuzzyScore, highlight, searchIndex, splitQuery } from './search-match.js';
-import { DATA_LANG, pickName } from './data-lang.js';
+import { dataLang, pickName } from './data-lang.js';
+import { t } from './i18n.js';
 import { siteUrl } from './paths.js';
 
 const URBIS_BASE = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
@@ -22,7 +23,7 @@ function ensureProj4() {
       const s = document.createElement('script');
       s.src = PROJ4_URL;
       s.onload = ok;
-      s.onerror = () => fail(new Error('proj4.js indisponible'));
+      s.onerror = () => fail(new Error(t('search.proj4Unavailable')));
       document.head.appendChild(s);
     });
   }
@@ -52,7 +53,7 @@ export function parsePosition(obj) {
   return null;
 }
 
-export function buildUrbisUrl(query, lang = DATA_LANG) {
+export function buildUrbisUrl(query, lang = dataLang()) {
   const { street, number } = splitQuery(query);
   const url = new URL(`${URBIS_BASE}/${number ? 'searchAddress' : 'searchStreetName'}`);
   url.searchParams.set('searchLanguage', lang);
@@ -68,7 +69,7 @@ async function searchUrbis(query, maxResults) {
   try {
     resp = await fetch(url, { headers: { Accept: 'application/json' } });
   } catch (netErr) {
-    throw new Error(`Réseau : ${netErr.message}`);
+    throw new Error(t('search.networkError', { message: netErr.message }));
   }
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
@@ -213,21 +214,21 @@ export function initSearch(map, { isLassoActive }) {
   }
 
   async function search(query) {
-    showStatus('Recherche\u2026');
+    showStatus(t('search.searching'));
     try {
       if (source === 'osm') {
         await loadIndex();
         const results = searchIndex(index, query, SEARCH_MAX);
-        if (!results.length) showStatus('Aucun r\u00e9sultat dans OSM');
+        if (!results.length) showStatus(t('search.noResultOsm'));
         else render(results, query);
       } else {
         const results = await searchUrbis(query, SEARCH_MAX);
-        if (!results.length) showStatus('Aucun r\u00e9sultat UrbIS');
+        if (!results.length) showStatus(t('search.noResultUrbis'));
         else render(results, query);
       }
     } catch (e) {
       console.error('[Search]', e);
-      showStatus(e.message || 'Erreur', true);
+      showStatus(e.message || t('search.error'), true);
     }
   }
 
@@ -261,7 +262,7 @@ export function initSearch(map, { isLassoActive }) {
       clearTimeout(debounce);
       debounce = setTimeout(() => search(q), 320);
     } else if (q.length >= 3) {
-      showStatus('\u21b5  Appuyez sur Entr\u00e9e pour rechercher');
+      showStatus(t('search.pressEnter'));
     }
   });
 
@@ -301,7 +302,7 @@ export function initSearch(map, { isLassoActive }) {
       if (source === 'osm' && q.length >= 3) {
         search(q);
       } else if (source === 'urbis' && q.length >= 3) {
-        showStatus('\u21b5  Appuyez sur Entr\u00e9e pour rechercher');
+        showStatus(t('search.pressEnter'));
       }
       if (source === 'osm') loadIndex().catch(() => {});
     });

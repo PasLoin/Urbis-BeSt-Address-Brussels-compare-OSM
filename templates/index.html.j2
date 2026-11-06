@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" data-root="{{ 'true' if is_root else 'false' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ t('meta.title') }}</title>
+  <meta name="description" content="{{ t('meta.description') }}">
+  <link rel="canonical" href="{{ canonical }}">
+{%- for alt in alternates %}
+  <link rel="alternate" hreflang="{{ alt.lang }}" href="{{ site_url }}{{ alt.path }}">
+{%- endfor %}
+  <link rel="alternate" hreflang="x-default" href="{{ site_url }}">
+  <meta name="theme-color" content="#1a3a8f">
+  <link rel="icon" href="{{ root }}assets/img/favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="{{ root }}assets/img/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ t('meta.siteName') }}">
+  <meta property="og:locale" content="{{ og_locale }}">
+{%- for alt in alternates if alt.lang != lang %}
+  <meta property="og:locale:alternate" content="{{ alt.og }}">
+{%- endfor %}
+  <meta property="og:url" content="{{ canonical }}">
+  <meta property="og:title" content="{{ t('meta.ogTitle') }}">
+  <meta property="og:description" content="{{ t('meta.ogDescription') }}">
+  <meta property="og:image" content="{{ site_url }}assets/img/cecinestpasunerue.png">
+  <meta property="og:image:width" content="962">
+  <meta property="og:image:height" content="430">
+  <meta property="og:image:alt" content="{{ t('meta.imageAlt') }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": {{ t('meta.siteName')|tojson }},
+    "alternateName": "Urbis-BeSt-Address-Brussels-compare-OSM",
+    "url": {{ canonical|tojson }},
+    "description": {{ t('meta.ldDescription')|tojson }},
+    "inLanguage": {{ lang|tojson }},
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "Web",
+    "isAccessibleForFree": true,
+    "license": "https://opensource.org/licenses/MIT",
+    "spatialCoverage": {
+      "@type": "Place",
+      "name": {{ t('meta.region')|tojson }}
+    },
+    "author": {
+      "@type": "Person",
+      "name": "PasLoin"
+    }
+  }
+  </script>
+  <script type="application/json" id="i18n-dict">{{ dict_json }}</script>
+  <script type="application/json" id="i18n-banners">{{ banners_json }}</script>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
+  <link rel="stylesheet" href="{{ root }}style.css"/>
+</head>
+<body>
+<div id="map"></div>
+<button id="lasso-btn" title="{{ t('lasso.title') }}">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M7 22a5 5 0 0 1-2-4"/>
+    <path d="M7 16.93c.96.43 1.96.74 2.99.91"/>
+    <path d="M3.34 14A6.8 6.8 0 0 1 2 10c0-4.42 4.48-8 10-8s10 3.58 10 8a7.19 7.19 0 0 1-.33 2"/>
+    <path d="M5 18a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/>
+    <path d="M14.33 22h-.09a.35.35 0 0 1-.24-.32v-10a.34.34 0 0 1 .56-.27l6.08 5.18a.36.36 0 0 1-.04.57l-2.72 1.33"/>
+    <path d="M17.73 19.4 21 23"/>
+  </svg>
+  {{ t('lasso.label') }}
+</button>
+<div id="lasso-panel">
+  <strong id="lasso-count">0</strong> <span id="lasso-label"></span>
+  <br>
+  <button id="lasso-export">{{ t('lasso.export') }}</button>
+  <button id="lasso-cancel">{{ t('lasso.cancel') }}</button>
+</div>
+<div id="search-control">
+  <div id="search-bar">
+    <button id="search-toggle" title="{{ t('search.open') }}" aria-label="{{ t('search.open') }}">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2.5"
+           stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+    </button>
+    <input id="search-input" type="text"
+           placeholder="{{ t('search.placeholder') }}"
+           autocomplete="off" spellcheck="false"
+           aria-label="{{ t('search.inputLabel') }}">
+    <button id="search-clear" title="{{ t('search.clear') }}" aria-label="{{ t('search.clear') }}">&times;</button>
+    <div id="search-src-pill">
+      <button class="src-btn active" data-src="osm">OSM</button>
+      <button class="src-btn"        data-src="urbis">UrbIS</button>
+    </div>
+  </div>
+  <ul id="search-dropdown" role="listbox"></ul>
+</div>
+<div id="basemap-control">
+  <button id="basemap-toggle" title="{{ t('basemap.title') }}" aria-label="{{ t('basemap.title') }}" aria-expanded="false" aria-controls="basemap-menu">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
+      <path d="M12 3 2 8l10 5 10-5-10-5Z" fill="#fff"/>
+      <path d="m2 12 10 5 10-5"/>
+      <path d="m2 16 10 5 10-5"/>
+    </svg>
+  </button>
+  <div id="basemap-menu" role="radiogroup" aria-label="{{ t('basemap.title') }}"></div>
+</div>
+<div id="lang-control">
+  <button id="lang-toggle" type="button" title="{{ t('lang.title') }}" aria-label="{{ t('lang.title') }}" aria-expanded="false" aria-controls="lang-menu">{{ lang|upper }}</button>
+  <div id="lang-menu" role="menu" aria-label="{{ t('lang.title') }}">
+{%- for alt in alternates %}
+    <a href="{{ (root ~ alt.path) or './' }}" class="lang-option{{ ' active' if alt.lang == lang else '' }}" role="menuitemradio" aria-checked="{{ 'true' if alt.lang == lang else 'false' }}" data-lang="{{ alt.lang }}" lang="{{ alt.lang }}" hreflang="{{ alt.lang }}">{{ alt.name }}</a>
+{%- endfor %}
+  </div>
+</div>
+<div id="lang-banner" role="region" aria-live="polite" hidden>
+  <span id="lang-banner-text"></span>
+  <a id="lang-banner-switch" href="#"></a>
+  <button id="lang-banner-close" type="button">&times;</button>
+</div>
+<div id="copy-toast">{{ t('toast.copied') }}</div>
+<details id="panel" open>
+  <summary>{{ t('panel.title') }} <span class="toggle-arrow"></span></summary>
+  <div id="filters"></div>
+  <div id="stats">
+    <div class="stats-bar" id="stats-bar"></div>
+    <div class="stats-rows" id="stats-rows"></div>
+  </div>
+  <div id="versions">
+    <div>{{ t('versions.urbis') }} <span id="urbis-date">…</span></div>
+    <div>{{ t('versions.osm') }} <span id="osm-date">…</span></div>
+  </div>
+</details>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
+<script type="module" src="{{ root }}js/app.js"></script>
+</body>
+</html>

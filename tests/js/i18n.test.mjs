@@ -1,0 +1,86 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createI18n, setI18n, t, currentLang, currentLocale } from '../../js/i18n.js';
+import { suggestedLang, redirectTarget, primaryBrowserLang } from '../../js/lang.js';
+import { generateOsmXml } from '../../js/osm-export.js';
+import { dataLang, localStreet } from '../../js/data-lang.js';
+import { buildUrbisUrl } from '../../js/search.js';
+import { useLang } from './helpers.mjs';
+
+const DICT = {
+  greeting: 'Bonjour {name}',
+  items: { one: '{count} \u00e9l\u00e9ment', other: '{count} \u00e9l\u00e9ments' }
+};
+
+test('t remplace les variables et garde celles qui manquent', () => {
+  const i18n = createI18n('fr', DICT);
+  assert.equal(i18n.t('greeting', { name: 'Bruxelles' }), 'Bonjour Bruxelles');
+  assert.equal(i18n.t('greeting'), 'Bonjour {name}');
+});
+
+test('une cl\u00e9 inconnue est rendue telle quelle', () => {
+  assert.equal(createI18n('fr', DICT).t('absente'), 'absente');
+});
+
+test('les pluriels suivent les r\u00e8gles de chaque langue', () => {
+  const fr = createI18n('fr', DICT);
+  assert.equal(fr.t('items', { count: 0 }), '0 \u00e9l\u00e9ment');
+  assert.equal(fr.t('items', { count: 1 }), '1 \u00e9l\u00e9ment');
+  assert.equal(fr.t('items', { count: 2 }), '2 \u00e9l\u00e9ments');
+  const en = createI18n('en', { items: { one: '{count} item', other: '{count} items' } });
+  assert.equal(en.t('items', { count: 0 }), '0 items');
+  assert.equal(en.t('items', { count: 1 }), '1 item');
+});
+
+test('la langue courante pilote t, la locale et la langue des donn\u00e9es', () => {
+  setI18n(createI18n('en', { hello: 'Hello' }));
+  assert.equal(t('hello'), 'Hello');
+  assert.equal(currentLang(), 'en');
+  assert.equal(currentLocale(), 'en-GB');
+  assert.equal(dataLang(), 'fr');
+  setI18n(createI18n('nl', {}));
+  assert.equal(dataLang(), 'nl');
+  assert.equal(currentLocale(), 'nl-BE');
+  assert.deepEqual(localStreet({ STRNAMEFRE: 'Rue de la Loi', STRNAMEDUT: 'Wetstraat' }), { primary: 'Wetstraat', secondary: 'Rue de la Loi' });
+  assert.equal(buildUrbisUrl('Wetstraat 16').searchParams.get('searchLanguage'), 'nl');
+});
+
+test('le pluriel du lasso existe en fran\u00e7ais et en anglais', () => {
+  useLang('fr');
+  assert.equal(t('lasso.selected', { count: 1 }), 'adresse s\u00e9lectionn\u00e9e');
+  assert.equal(t('lasso.selected', { count: 3 }), 'adresses s\u00e9lectionn\u00e9es');
+  useLang('en');
+  assert.equal(t('lasso.selected', { count: 1 }), 'address selected');
+  assert.equal(t('lasso.selected', { count: 0 }), 'addresses selected');
+});
+
+test('l\u2019export .osm est identique quelle que soit la langue', () => {
+  const features = [{
+    properties: { STRNAMEFRE: 'Rue de la Loi', STRNAMEDUT: 'Wetstraat', POLICENUM: '16', INSPIRE_ID: 'X/1' },
+    lng: 4.3685,
+    lat: 50.8466
+  }];
+  useLang('fr');
+  const fr = generateOsmXml(features);
+  useLang('en');
+  assert.equal(generateOsmXml(features), fr);
+});
+
+test('seule la langue principale du navigateur d\u00e9clenche le bandeau', () => {
+  const base = { pageLang: 'fr', available: ['fr', 'en'], savedChoice: null };
+  assert.equal(suggestedLang({ ...base, browserLanguages: ['en-US', 'en'] }), 'en');
+  assert.equal(suggestedLang({ ...base, browserLanguages: ['fr-BE', 'en'] }), null);
+  assert.equal(suggestedLang({ ...base, browserLanguages: ['nl-BE', 'nl', 'en'] }), null);
+  assert.equal(suggestedLang({ ...base, browserLanguages: ['en-GB'], savedChoice: 'fr' }), null);
+  assert.equal(suggestedLang({ ...base, browserLanguages: [] }), null);
+  assert.equal(primaryBrowserLang(['NL-be']), 'nl');
+});
+
+test('la redirection n\u2019a lieu que depuis la racine et sur choix m\u00e9moris\u00e9', () => {
+  const base = { pageLang: 'fr', available: ['fr', 'en'] };
+  assert.equal(redirectTarget({ ...base, isRoot: true, savedChoice: 'en' }), 'en');
+  assert.equal(redirectTarget({ ...base, isRoot: true, savedChoice: 'fr' }), null);
+  assert.equal(redirectTarget({ ...base, isRoot: true, savedChoice: null }), null);
+  assert.equal(redirectTarget({ ...base, isRoot: true, savedChoice: 'nl' }), null);
+  assert.equal(redirectTarget({ pageLang: 'en', available: ['fr', 'en'], isRoot: false, savedChoice: 'fr' }), null);
+});

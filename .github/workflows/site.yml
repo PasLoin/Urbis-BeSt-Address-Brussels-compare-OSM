@@ -35,6 +35,9 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements-dev.txt
 
+      - name: Translation check
+        run: python check-i18n.py
+
       - name: JS tests
         run: npm test
 
@@ -51,7 +54,6 @@ jobs:
         run: python -m playwright install --with-deps chromium
 
       - name: End-to-end tests
-        continue-on-error: true
         run: python -m pytest tests/test_e2e.py -v
 
       - name: Upload screenshots
@@ -70,7 +72,7 @@ jobs:
 
   deploy:
     needs: build-test
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.PAGES_FROM_ACTIONS == 'true'
+    if: vars.PAGES_FROM_ACTIONS == 'true' && (github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/main' && github.event_name != 'pull_request'))
     runs-on: ubuntu-latest
     concurrency:
       group: pages
