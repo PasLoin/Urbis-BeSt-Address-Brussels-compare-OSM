@@ -5,10 +5,12 @@ import {
   BAR_ORDER,
   NON_EXPORTABLE,
   getStatus,
+  statusLabel,
   statusColorExpression,
   statusDot
 } from '../../js/statuses.js';
 import { initialFilterState, filterExpression } from '../../js/filters.js';
+import { loadDict, useLang } from './helpers.mjs';
 
 test('les codes de statut sont uniques et correspondent aux tuiles', () => {
   const codes = STATUSES.map(s => s.code);
@@ -34,8 +36,27 @@ test('seules les adresses UrbIS sont exportables', () => {
 test('la barre ne contient que des statuts de couverture', () => {
   for (const code of BAR_ORDER) {
     assert.ok(getStatus(code).coverage);
-    assert.ok(getStatus(code).barLabel);
+    assert.ok(getStatus(code).barKey);
   }
+});
+
+test('chaque cl\u00e9 de statut existe dans les dictionnaires', () => {
+  for (const lang of ['fr', 'en']) {
+    const dict = loadDict(lang);
+    for (const status of STATUSES) {
+      for (const key of [status.labelKey, status.statsKey, status.barKey].filter(Boolean)) {
+        assert.ok(key in dict, `${lang}.json : ${key}`);
+      }
+    }
+  }
+});
+
+test('statusLabel suit la langue courante', () => {
+  useLang('fr');
+  assert.equal(statusLabel('missing'), 'Manquante dans OSM');
+  useLang('en');
+  assert.equal(statusLabel('missing'), 'Missing from OSM');
+  assert.equal(statusLabel('inconnu'), 'inconnu');
 });
 
 test('statusDot utilise la couleur du statut', () => {
