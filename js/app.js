@@ -5,16 +5,17 @@ import { OSM_CARTO_STYLE, initBasemaps } from './basemaps.js';
 import { addLassoLayers, initLasso } from './lasso.js';
 import { initPopup } from './popup.js';
 import { initSearch } from './search.js';
+import { siteUrl } from './paths.js';
 
 const ADDRESS_SOURCE = 'addresses-source';
-const ADDRESS_TILES = 'addresses.pmtiles';
+const ADDRESS_TILES = siteUrl('addresses.pmtiles');
 const CUSTOM_ATTRIBUTION = [
   'Adresses : <a href="https://datastore.brussels/web/data/dataset/a8c9ccde-5c2b-11ed-913a-900f0cda5d5c" target="_blank">Paradigm</a> (CC-0)',
   '<a href="https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM" target="_blank">PasLoin</a>'
 ];
 
 function loadVersion() {
-  fetch('version.json')
+  fetch(siteUrl('version.json'))
     .then(r => r.json())
     .then(version => {
       renderVersionInfo(version);
