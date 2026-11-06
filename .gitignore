@@ -6,3 +6,6 @@ __pycache__/
 *.osm.pbf
 *.gpkg
 *.zip
+addresses.pmtiles
+search-index.json
+version.json
