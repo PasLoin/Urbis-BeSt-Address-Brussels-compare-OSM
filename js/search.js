@@ -1,7 +1,7 @@
 import { escapeHtml } from './html.js';
 import { fuzzyScore, highlight, searchIndex, splitQuery } from './search-match.js';
 import { dataLang, pickName } from './data-lang.js';
-import { t } from './i18n.js';
+import { t, currentLang } from './i18n.js';
 import { siteUrl } from './paths.js';
 
 const URBIS_BASE = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
@@ -63,6 +63,33 @@ export function buildUrbisUrl(query, lang = dataLang()) {
   return url;
 }
 
+const DATABRUSSELS_HOST = 'databrussels.be';
+const DATABRUSSELS_LANGS = ['fr', 'nl', 'en'];
+
+export function localizedDatabrusselsUrl(url, lang = currentLang()) {
+  if (!url) return null;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (e) {
+    return url;
+  }
+  if (parsed.hostname !== DATABRUSSELS_HOST || !DATABRUSSELS_LANGS.includes(lang)) return url;
+  const path = parsed.pathname.replace(/^\/(fr|nl|en)(?=\/)/, '');
+  parsed.pathname = `/${lang}${path}`;
+  return parsed.href;
+}
+
+export function streetNameUrl(streetName, lang = currentLang()) {
+  const code = streetName?.code;
+  let url = streetName?.href || null;
+  if (!url && code?.objectIdentifier) {
+    url = `https://${DATABRUSSELS_HOST}/id/streetname/${code.objectIdentifier}`;
+    if (code.versionIdentifier) url += `/${code.versionIdentifier}`;
+  }
+  return localizedDatabrusselsUrl(url, lang);
+}
+
 export function urbisLanguages(primary = dataLang()) {
   return primary === 'nl' ? ['nl', 'fr'] : ['fr', 'nl'];
 }
@@ -121,9 +148,7 @@ async function searchUrbisIn(query, lang, maxResults) {
         label = pickName(sn?.name);
         sub = pickName(item.municipality?.name) || '';
         pos = parsePosition(sn) || parsePosition(item);
-        refUrl = sn?.href || (sn?.code?.objectIdentifier
-          ? `https://databrussels.be/id/streetname/${sn.code.objectIdentifier}`
-          : null);
+        refUrl = streetNameUrl(sn);
       } else if (item.municipality) {
         label = pickName(item.municipality.name);
         pos = parsePosition(item.municipality);
