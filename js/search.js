@@ -63,8 +63,20 @@ export function buildUrbisUrl(query, lang = dataLang()) {
   return url;
 }
 
+export function urbisLanguages(primary = dataLang()) {
+  return primary === 'nl' ? ['nl', 'fr'] : ['fr', 'nl'];
+}
+
 async function searchUrbis(query, maxResults) {
-  const url = buildUrbisUrl(query);
+  for (const lang of urbisLanguages()) {
+    const results = await searchUrbisIn(query, lang, maxResults);
+    if (results.length) return results;
+  }
+  return [];
+}
+
+async function searchUrbisIn(query, lang, maxResults) {
+  const url = buildUrbisUrl(query, lang);
   let resp;
   try {
     resp = await fetch(url, { headers: { Accept: 'application/json' } });
