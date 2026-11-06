@@ -14,6 +14,7 @@ REFERENCE_LANG = 'fr'
 LANGS = {
     'fr': {'path': '', 'og': 'fr_BE', 'name': 'Français'},
     'en': {'path': 'en/', 'og': 'en_GB', 'name': 'English'},
+    'nl': {'path': 'nl/', 'og': 'nl_BE', 'name': 'Nederlands'},
 }
 BANNER_KEYS = {'text': 'banner.text', 'switch': 'banner.switch', 'dismiss': 'banner.dismiss'}
 STATIC = ['js', 'assets', 'style.css', 'taginfo.json']
