@@ -1,4 +1,4 @@
-import { i18nFromDocument, setI18n, t } from './i18n.js';
+import { i18nFromDocument, setI18n } from './i18n.js';
 import { statusColorExpression } from './statuses.js';
 import { renderStats, renderVersionInfo } from './stats.js';
 import { initFilters, ADDRESS_LAYER } from './filters.js';
@@ -12,25 +12,25 @@ import { redirectToSavedLanguage, initLanguageControl, initLanguageBanner } from
 const ADDRESS_SOURCE = 'addresses-source';
 const ADDRESS_TILES = siteUrl('addresses.pmtiles');
 
-function customAttribution() {
+function customAttribution(i18n) {
   return [
-    `${t('attribution.addresses')} <a href="https://datastore.brussels/web/data/dataset/a8c9ccde-5c2b-11ed-913a-900f0cda5d5c" target="_blank">Paradigm</a> (CC-0)`,
+    `${i18n.t('attribution.addresses')} <a href="https://datastore.brussels/web/data/dataset/a8c9ccde-5c2b-11ed-913a-900f0cda5d5c" target="_blank">Paradigm</a> (CC-0)`,
     '<a href="https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM" target="_blank">PasLoin</a>'
   ];
 }
 
-function loadVersion() {
+function loadVersion(i18n) {
   fetch(siteUrl('version.json'))
     .then(r => r.json())
     .then(version => {
-      renderVersionInfo(version);
-      renderStats(version);
+      renderVersionInfo(version, i18n);
+      renderStats(version, i18n);
     })
-    .catch(() => renderVersionInfo(null));
+    .catch(() => renderVersionInfo(null, i18n));
 }
 
-function start() {
-  loadVersion();
+function start(i18n) {
+  loadVersion(i18n);
 
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol('pmtiles', protocol.tile);
@@ -50,14 +50,14 @@ function start() {
 
   function renderAttribution() {
     if (attributionControl) map.removeControl(attributionControl);
-    attributionControl = new maplibregl.AttributionControl({ compact: false, customAttribution: customAttribution() });
+    attributionControl = new maplibregl.AttributionControl({ compact: false, customAttribution: customAttribution(i18n) });
     map.addControl(attributionControl);
   }
 
   renderAttribution();
   map.addControl(new maplibregl.NavigationControl(), 'bottom-left');
 
-  const filters = initFilters(map);
+  const filters = initFilters(map, { i18n });
 
   map.on('load', () => {
     map.addSource(ADDRESS_SOURCE, { type: 'vector', url: `pmtiles://${ADDRESS_TILES}` });
@@ -77,12 +77,12 @@ function start() {
     addLassoLayers(map);
   });
 
-  initBasemaps(map);
-  const lasso = initLasso(map);
-  initPopup(map, { isLassoActive: lasso.isActive });
-  const search = initSearch(map, { isLassoActive: lasso.isActive });
-  initLanguageControl();
-  initLanguageBanner();
+  initBasemaps(map, i18n);
+  const lasso = initLasso(map, i18n);
+  initPopup(map, { isLassoActive: lasso.isActive, i18n });
+  const search = initSearch(map, { isLassoActive: lasso.isActive, i18n });
+  initLanguageControl(i18n);
+  initLanguageBanner(i18n);
 
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
@@ -91,5 +91,6 @@ function start() {
   });
 }
 
-setI18n(i18nFromDocument());
-if (!redirectToSavedLanguage()) start();
+const i18n = i18nFromDocument();
+setI18n(i18n);
+if (!redirectToSavedLanguage(i18n)) start(i18n);

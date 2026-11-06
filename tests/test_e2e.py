@@ -41,6 +41,7 @@ def reference_only_strings(lang):
 def errors(page):
     collected = []
     page.on('pageerror', lambda exc: collected.append(str(exc)))
+    page.on('console', lambda msg: collected.append(msg.text) if msg.text.startswith('[i18n]') else None)
     return collected
 
 
@@ -127,23 +128,38 @@ def test_lien_partage_vers_une_langue_respecte(page, site_url):
     expect(page.locator('html')).to_have_attribute('lang', 'en')
 
 
-@pytest.mark.parametrize('visible', [
-    pytest.param(True, id='en-US', marks=pytest.mark.browser_context_args(locale='en-US')),
-    pytest.param(False, id='fr-BE', marks=pytest.mark.browser_context_args(locale='fr-BE')),
-    pytest.param(False, id='nl-BE', marks=pytest.mark.browser_context_args(locale='nl-BE')),
+@pytest.mark.parametrize('suggested', [
+    pytest.param(lang, id=f'{lang}-{region}', marks=pytest.mark.browser_context_args(locale=f'{lang}-{region}'))
+    for lang, region in (('en', 'US'), ('nl', 'BE'), ('fr', 'BE'))
 ])
-def test_bandeau_selon_la_langue_du_navigateur(page, site_url, visible):
+def test_bandeau_selon_la_langue_du_navigateur(page, site_url, suggested):
     open_site(page, site_url)
     banner = page.locator('#lang-banner')
-    if visible:
+    if suggested in TRANSLATED_LANGS:
         expect(banner).to_be_visible()
-        expect(banner).to_contain_text('This map is also available in English.')
+        expect(banner).to_contain_text(dictionary(suggested)['banner.text'])
         page.click('#lang-banner-close')
         expect(banner).to_be_hidden()
-        assert page.evaluate("localStorage.getItem('urbis-osm-lang')") == 'fr'
+        assert page.evaluate("localStorage.getItem('urbis-osm-lang')") == REFERENCE_LANG
     else:
         page.wait_for_timeout(500)
         expect(banner).to_be_hidden()
+
+
+@pytest.mark.parametrize('lang', LANG_PATHS)
+def test_placeholder_de_recherche_lisible_en_entier(page, site_url, lang):
+    open_site(page, site_url, lang)
+    page.click('#search-toggle')
+    page.wait_for_timeout(400)
+    overflow = page.evaluate("""() => {
+      const input = document.getElementById('search-input');
+      const style = getComputedStyle(input);
+      const ctx = document.createElement('canvas').getContext('2d');
+      ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const available = input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      return Math.ceil(ctx.measureText(input.placeholder).width - available);
+    }""")
+    assert overflow <= 0, f'placeholder trop long de {overflow} px'
 
 
 @pytest.mark.parametrize('lang', LANG_PATHS)

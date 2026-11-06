@@ -4,8 +4,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-REFERENCE = 'fr'
 I18N_DIR = ROOT / 'i18n'
+LANGUAGES_FILE = I18N_DIR / 'languages.json'
+LANGUAGE_FIELDS = {'path', 'locale', 'og', 'name', 'data'}
+DATA_LANGS = {'fr', 'nl'}
 TEMPLATE = ROOT / 'templates' / 'index.html.j2'
 JS_DIR = ROOT / 'js'
 PLURAL_FORMS = {'zero', 'one', 'two', 'few', 'many', 'other'}
@@ -27,7 +29,7 @@ def placeholders(value):
     return {name for text in texts for name in PLACEHOLDER.findall(text)}
 
 
-def check_value(lang, key, value, ref_value, errors):
+def check_value(lang, key, value, ref_value, errors, reference_lang):
     if isinstance(ref_value, dict):
         if not isinstance(value, dict):
             errors.append(f'{lang}.json : « {key} » doit avoir des formes de pluriel')
@@ -38,7 +40,7 @@ def check_value(lang, key, value, ref_value, errors):
         errors.append(f'{lang}.json : « {key} » doit être un texte')
         return
     if placeholders(value) != placeholders(ref_value):
-        errors.append(f'{lang}.json : « {key} » n’a pas les mêmes variables que {REFERENCE}.json')
+        errors.append(f'{lang}.json : « {key} » n’a pas les mêmes variables que {reference_lang}.json')
     texts = value.values() if isinstance(value, dict) else [value]
     if any(not text.strip() for text in texts):
         errors.append(f'{lang}.json : « {key} » est vide')
@@ -75,13 +77,50 @@ def hardcoded_french():
     return found
 
 
+def check_languages(config, errors):
+    langs = config.get('languages') or {}
+    if config.get('reference') not in langs:
+        errors.append(f'{LANGUAGES_FILE.name} : la langue de référence doit faire partie de « languages »')
+    if not config.get('timeZone'):
+        errors.append(f'{LANGUAGES_FILE.name} : « timeZone » manquant')
+    for lang, conf in langs.items():
+        missing = LANGUAGE_FIELDS - set(conf)
+        if missing:
+            errors.append(f'{LANGUAGES_FILE.name} : « {lang} » sans {", ".join(sorted(missing))}')
+        if conf.get('data') not in DATA_LANGS:
+            errors.append(f'{LANGUAGES_FILE.name} : « {lang} » doit avoir « data » égal à fr ou nl (langues des données UrbIS)')
+        path = conf.get('path', '')
+        if path and not re.fullmatch(r'[a-z]{2}/', path):
+            errors.append(f'{LANGUAGES_FILE.name} : chemin « {path} » invalide pour « {lang} »')
+    roots = [lang for lang, conf in langs.items() if conf.get('path') == '']
+    if roots != [config.get('reference')]:
+        errors.append(f'{LANGUAGES_FILE.name} : seule la langue de référence doit être à la racine (path vide)')
+    paths = [conf.get('path') for conf in langs.values()]
+    if len(paths) != len(set(paths)):
+        errors.append(f'{LANGUAGES_FILE.name} : deux langues ont le même chemin')
+    declared = set(langs)
+    files = {p.stem for p in I18N_DIR.glob('*.json') if p != LANGUAGES_FILE}
+    for lang in sorted(declared - files):
+        errors.append(f'{lang}.json manquant pour la langue déclarée « {lang} »')
+    for lang in sorted(files - declared):
+        errors.append(f'{lang}.json présent mais « {lang} » absent de {LANGUAGES_FILE.name}')
+    return sorted(declared & files)
+
+
 def main():
     errors = []
     warnings = []
     dictionaries = {}
-    for path in sorted(I18N_DIR.glob('*.json')):
+    try:
+        config = json.loads(LANGUAGES_FILE.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f'[ERREUR] {LANGUAGES_FILE.name} illisible ({e})')
+        sys.exit(1)
+    REFERENCE = config.get('reference')
+    for lang in check_languages(config, errors):
+        path = I18N_DIR / f'{lang}.json'
         try:
-            dictionaries[path.stem] = json.loads(path.read_text(encoding='utf-8'))
+            dictionaries[lang] = json.loads(path.read_text(encoding='utf-8'))
         except json.JSONDecodeError as e:
             errors.append(f'{path.name} : JSON invalide ({e})')
     reference = dictionaries.get(REFERENCE)
@@ -94,7 +133,7 @@ def main():
             for key in sorted(set(strings) - set(reference)):
                 errors.append(f'{lang}.json : clé inconnue de {REFERENCE}.json « {key} »')
             for key in sorted(set(reference) & set(strings)):
-                check_value(lang, key, strings[key], reference[key], errors)
+                check_value(lang, key, strings[key], reference[key], errors, REFERENCE)
         keys = used_keys()
         for key, origin in sorted(keys.items()):
             if key not in reference:

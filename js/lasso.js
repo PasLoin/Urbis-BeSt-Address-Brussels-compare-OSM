@@ -2,7 +2,7 @@ import { NON_EXPORTABLE } from './statuses.js';
 import { pointInPolygon } from './geometry.js';
 import { downloadOsmXml } from './osm-export.js';
 import { ADDRESS_LAYER } from './filters.js';
-import { t } from './i18n.js';
+import { getI18n } from './i18n.js';
 
 export const LASSO_SOURCE = 'lasso-source';
 const MIN_DIST = 10;
@@ -14,7 +14,7 @@ export function addLassoLayers(map) {
   map.addLayer({ id: 'lasso-line', type: 'line', source: LASSO_SOURCE, paint: { 'line-color': '#2980b9', 'line-width': 2, 'line-dasharray': [3, 2] } });
 }
 
-export function initLasso(map) {
+export function initLasso(map, i18n = getI18n()) {
   let active = false;
   let drawing = false;
   let points = [];
@@ -81,7 +81,7 @@ export function initLasso(map) {
       }
     }
     countEl.textContent = selected.length;
-    labelEl.textContent = t('lasso.selected', { count: selected.length });
+    labelEl.textContent = i18n.t('lasso.selected', { count: selected.length });
     panel.style.display = 'block';
     active = false;
     drawing = false;

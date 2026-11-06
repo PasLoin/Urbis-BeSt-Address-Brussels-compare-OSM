@@ -1,9 +1,11 @@
 import { escapeHtml } from './html.js';
 import { fuzzyScore, highlight, searchIndex, splitQuery } from './search-match.js';
-import { dataLang, pickName } from './data-lang.js';
-import { t } from './i18n.js';
+import { pickName } from './data-lang.js';
+import { getI18n } from './i18n.js';
+import { DATABRUSSELS_HOST, localizedDatabrusselsUrl } from './databrussels.js';
 import { siteUrl } from './paths.js';
 
+const URBIS_LANGS = ['fr', 'nl'];
 const URBIS_BASE = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
 const SEARCH_MAX = 7;
 const SEARCH_ZOOM = 18;
@@ -16,22 +18,22 @@ const PROJ_L72 = '+proj=lcc +lat_1=51.16666723333333 +lat_2=49.8333339 '
 
 let proj4Promise = null;
 
-function ensureProj4() {
+function ensureProj4(i18n) {
   if (!proj4Promise) {
     proj4Promise = new Promise((ok, fail) => {
       if (window.proj4) { ok(); return; }
       const s = document.createElement('script');
       s.src = PROJ4_URL;
       s.onload = ok;
-      s.onerror = () => fail(new Error(t('search.proj4Unavailable')));
+      s.onerror = () => fail(new Error(i18n.t('search.proj4Unavailable')));
       document.head.appendChild(s);
     });
   }
   return proj4Promise;
 }
 
-async function lambertToLngLat(x, y) {
-  await ensureProj4();
+async function lambertToLngLat(x, y, i18n) {
+  await ensureProj4(i18n);
   if (!window.proj4.defs('EPSG:31370')) window.proj4.defs('EPSG:31370', PROJ_L72);
   const [lon, lat] = window.proj4('EPSG:31370', 'WGS84', [+x, +y]);
   return [lon, lat];
@@ -53,7 +55,7 @@ export function parsePosition(obj) {
   return null;
 }
 
-export function buildUrbisUrl(query, lang = dataLang()) {
+export function buildUrbisUrl(query, lang = getI18n().dataLang) {
   const { street, number } = splitQuery(query);
   const url = new URL(`${URBIS_BASE}/${number ? 'searchAddress' : 'searchStreetName'}`);
   url.searchParams.set('searchLanguage', lang);
@@ -63,13 +65,47 @@ export function buildUrbisUrl(query, lang = dataLang()) {
   return url;
 }
 
-async function searchUrbis(query, maxResults) {
-  const url = buildUrbisUrl(query);
+export function streetNameUrl(streetName, lang = getI18n().lang) {
+  const code = streetName?.code;
+  let url = streetName?.href || null;
+  if (!url && code?.objectIdentifier) {
+    url = `https://${DATABRUSSELS_HOST}/id/streetname/${code.objectIdentifier}`;
+    if (code.versionIdentifier) url += `/${code.versionIdentifier}`;
+  }
+  return localizedDatabrusselsUrl(url, lang);
+}
+
+export function urbisLanguages(primary = getI18n().dataLang) {
+  return [primary, ...URBIS_LANGS.filter(lang => lang !== primary)];
+}
+
+export async function searchAcrossLanguages(langs, searchIn) {
+  let answered = false;
+  let lastError = null;
+  for (const lang of langs) {
+    try {
+      const results = await searchIn(lang);
+      answered = true;
+      if (results.length) return results;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  if (!answered && lastError) throw lastError;
+  return [];
+}
+
+function searchUrbis(query, maxResults, i18n) {
+  return searchAcrossLanguages(urbisLanguages(i18n.dataLang), lang => searchUrbisIn(query, lang, maxResults, i18n));
+}
+
+async function searchUrbisIn(query, lang, maxResults, i18n) {
+  const url = buildUrbisUrl(query, lang);
   let resp;
   try {
     resp = await fetch(url, { headers: { Accept: 'application/json' } });
   } catch (netErr) {
-    throw new Error(t('search.networkError', { message: netErr.message }));
+    throw new Error(i18n.t('search.networkError', { message: netErr.message }));
   }
   if (!resp.ok) {
     const body = await resp.text().catch(() => '');
@@ -85,30 +121,28 @@ async function searchUrbis(query, maxResults) {
       let refUrl = null;
       if (item.address) {
         const addr = item.address;
-        label = pickName(addr.hasStreetName?.streetname?.name);
+        label = pickName(addr.hasStreetName?.streetname?.name, i18n.dataLang);
         const hn = addr.houseNumber || '';
         if (hn) label = `${label} ${hn}`.trim();
-        const mun = pickName(addr.hasMunicipality?.name);
+        const mun = pickName(addr.hasMunicipality?.name, i18n.dataLang);
         const pc = addr.hasPostalInfo?.code?.objectIdentifier || '';
         sub = [mun, pc].filter(Boolean).join(' \u00b7 ');
         pos = parsePosition(addr);
       } else if (item.streetname) {
         const sn = item.streetname;
-        label = pickName(sn?.name);
-        sub = pickName(item.municipality?.name) || '';
+        label = pickName(sn?.name, i18n.dataLang);
+        sub = pickName(item.municipality?.name, i18n.dataLang) || '';
         pos = parsePosition(sn) || parsePosition(item);
-        refUrl = sn?.href || (sn?.code?.objectIdentifier
-          ? `https://databrussels.be/id/streetname/${sn.code.objectIdentifier}`
-          : null);
+        refUrl = streetNameUrl(sn, i18n.lang);
       } else if (item.municipality) {
-        label = pickName(item.municipality.name);
+        label = pickName(item.municipality.name, i18n.dataLang);
         pos = parsePosition(item.municipality);
       } else {
         continue;
       }
       if (!label || !pos) continue;
       try {
-        const lngLat = await lambertToLngLat(pos.x, pos.y);
+        const lngLat = await lambertToLngLat(pos.x, pos.y, i18n);
         results.push({ label, sub, lngLat, score: fuzzyScore(query, label), source: 'urbis', refUrl });
       } catch (_) {}
     }
@@ -116,7 +150,7 @@ async function searchUrbis(query, maxResults) {
   return results.sort((a, b) => b.score - a.score).slice(0, maxResults);
 }
 
-export function initSearch(map, { isLassoActive }) {
+export function initSearch(map, { isLassoActive, i18n = getI18n() }) {
   let source = 'osm';
   let index = null;
   let indexLoading = false;
@@ -214,21 +248,21 @@ export function initSearch(map, { isLassoActive }) {
   }
 
   async function search(query) {
-    showStatus(t('search.searching'));
+    showStatus(i18n.t('search.searching'));
     try {
       if (source === 'osm') {
         await loadIndex();
         const results = searchIndex(index, query, SEARCH_MAX);
-        if (!results.length) showStatus(t('search.noResultOsm'));
+        if (!results.length) showStatus(i18n.t('search.noResultOsm'));
         else render(results, query);
       } else {
-        const results = await searchUrbis(query, SEARCH_MAX);
-        if (!results.length) showStatus(t('search.noResultUrbis'));
+        const results = await searchUrbis(query, SEARCH_MAX, i18n);
+        if (!results.length) showStatus(i18n.t('search.noResultUrbis'));
         else render(results, query);
       }
     } catch (e) {
       console.error('[Search]', e);
-      showStatus(e.message || t('search.error'), true);
+      showStatus(e.message || i18n.t('search.error'), true);
     }
   }
 
@@ -262,7 +296,7 @@ export function initSearch(map, { isLassoActive }) {
       clearTimeout(debounce);
       debounce = setTimeout(() => search(q), 320);
     } else if (q.length >= 3) {
-      showStatus(t('search.pressEnter'));
+      showStatus(i18n.t('search.pressEnter'));
     }
   });
 
@@ -302,7 +336,7 @@ export function initSearch(map, { isLassoActive }) {
       if (source === 'osm' && q.length >= 3) {
         search(q);
       } else if (source === 'urbis' && q.length >= 3) {
-        showStatus(t('search.pressEnter'));
+        showStatus(i18n.t('search.pressEnter'));
       }
       if (source === 'osm') loadIndex().catch(() => {});
     });

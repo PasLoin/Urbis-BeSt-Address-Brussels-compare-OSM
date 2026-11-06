@@ -50,11 +50,11 @@ test('searchIndex trouve une rue puis une adresse', () => {
 });
 
 test('buildUrbisUrl choisit le bon endpoint et garde la langue fr', () => {
-  const street = buildUrbisUrl('Rue Royale');
+  const street = buildUrbisUrl('Rue Royale', 'fr');
   assert.match(street.pathname, /searchStreetName$/);
   assert.equal(street.searchParams.get('searchLanguage'), 'fr');
   assert.equal(street.searchParams.get('policeNumber'), null);
-  const address = buildUrbisUrl('Rue Royale 80');
+  const address = buildUrbisUrl('Rue Royale 80', 'fr');
   assert.match(address.pathname, /searchAddress$/);
   assert.equal(address.searchParams.get('streetName'), 'Rue Royale');
   assert.equal(address.searchParams.get('policeNumber'), '80');
@@ -75,9 +75,9 @@ test('pointInPolygon distingue int\u00e9rieur et ext\u00e9rieur', () => {
 
 test('localStreet et localMunicipality respectent la langue et retombent sur le fran\u00e7ais', () => {
   const props = { STRNAMEFRE: 'Rue de la Loi', STRNAMEDUT: 'Wetstraat', MUNNAMEFRE: 'Bruxelles', MUNNAMEDUT: 'Brussel' };
-  assert.deepEqual(localStreet(props), { primary: 'Rue de la Loi', secondary: 'Wetstraat' });
+  assert.deepEqual(localStreet(props, 'fr'), { primary: 'Rue de la Loi', secondary: 'Wetstraat' });
   assert.deepEqual(localStreet(props, 'nl'), { primary: 'Wetstraat', secondary: 'Rue de la Loi' });
-  assert.equal(localMunicipality(props), 'Bruxelles');
+  assert.equal(localMunicipality(props, 'fr'), 'Bruxelles');
   assert.equal(localMunicipality(props, 'nl'), 'Brussel');
   const osmOnly = { STRNAMEFRE: 'Rue X - X-straat', STRNAMEDUT: null, MUNNAMEDUT: null };
   assert.deepEqual(localStreet(osmOnly, 'nl'), { primary: 'Rue X - X-straat', secondary: '' });
@@ -86,8 +86,8 @@ test('localStreet et localMunicipality respectent la langue et retombent sur le 
 
 test('pickName pr\u00e9f\u00e8re la langue demand\u00e9e', () => {
   const names = [{ language: 'nl', spelling: 'Wetstraat' }, { language: 'fr', spelling: 'Rue de la Loi' }];
-  assert.equal(pickName(names), 'Rue de la Loi');
+  assert.equal(pickName(names, 'fr'), 'Rue de la Loi');
   assert.equal(pickName(names, 'nl'), 'Wetstraat');
   assert.equal(pickName(names, 'de'), 'Wetstraat');
-  assert.equal(pickName(undefined), '');
+  assert.equal(pickName(undefined, 'fr'), '');
 });

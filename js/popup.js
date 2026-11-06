@@ -1,5 +1,6 @@
 import { getStatus, statusDot, statusLabel } from './statuses.js';
-import { t } from './i18n.js';
+import { getI18n } from './i18n.js';
+import { localizedDatabrusselsUrl } from './databrussels.js';
 import { extractInspireId, inspireUrl, downloadOsmXml } from './osm-export.js';
 import { localStreet, localMunicipality } from './data-lang.js';
 import { escapeHtml } from './html.js';
@@ -8,8 +9,8 @@ import { ADDRESS_LAYER } from './filters.js';
 
 const BBOX_DELTA = 0.0008;
 
-export function statusLabelHtml(code) {
-  return getStatus(code) ? `${statusDot(code)}${escapeHtml(statusLabel(code))}` : escapeHtml(code);
+export function statusLabelHtml(code, i18n = getI18n()) {
+  return getStatus(code) ? `${statusDot(code)}${escapeHtml(statusLabel(code, i18n))}` : escapeHtml(code);
 }
 
 export function externalLinks(lng, lat) {
@@ -20,18 +21,18 @@ export function externalLinks(lng, lat) {
   };
 }
 
-export function popupHtml(props, lng, lat, uid) {
+export function popupHtml(props, lng, lat, uid, i18n = getI18n()) {
   const numericId = extractInspireId(props.INSPIRE_ID);
   const hasInspire = Boolean(props.INSPIRE_ID);
   const links = externalLinks(lng, lat);
-  const street = localStreet(props);
+  const street = localStreet(props, i18n.dataLang);
   const number = props.POLICENUM || '';
   const inspireRow = hasInspire
-    ? `<div class="popup-meta-row"><strong>${escapeHtml(t('popup.inspire'))}</strong>
-           <a href="${escapeHtml(inspireUrl(props.INSPIRE_ID))}" target="_blank" rel="noopener noreferrer" class="inspire-link">${escapeHtml(numericId)}</a>
-           <button class="copy-id-btn" id="${uid}" title="${escapeHtml(t('popup.copyId'))}">
+    ? `<div class="popup-meta-row"><strong>${escapeHtml(i18n.t('popup.inspire'))}</strong>
+           <a href="${escapeHtml(localizedDatabrusselsUrl(inspireUrl(props.INSPIRE_ID), i18n.lang))}" target="_blank" rel="noopener noreferrer" class="inspire-link">${escapeHtml(numericId)}</a>
+           <button class="copy-id-btn" id="${uid}" title="${escapeHtml(i18n.t('popup.copyId'))}">
              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-             ${escapeHtml(t('popup.copy'))}
+             ${escapeHtml(i18n.t('popup.copy'))}
            </button></div>`
     : '';
   const osmButton = hasInspire ? `<button class="osm-xml-btn" id="osm-dl-${uid}">⬇ .osm</button>` : '';
@@ -39,8 +40,8 @@ export function popupHtml(props, lng, lat, uid) {
           <div class="popup-title"><strong>${escapeHtml(street.primary)} ${escapeHtml(number)}</strong><br>
             <small>${escapeHtml(street.secondary)} ${street.secondary ? escapeHtml(number) : ''}</small></div>
           <div class="popup-meta">
-            <div class="popup-meta-row"><strong>${escapeHtml(t('popup.status'))}</strong> ${statusLabelHtml(props.status)}</div>${inspireRow}</div>
-          <div class="popup-footer">${escapeHtml(props.ZIPCODE || '')} ${escapeHtml(localMunicipality(props))}</div>
+            <div class="popup-meta-row"><strong>${escapeHtml(i18n.t('popup.status'))}</strong> ${statusLabelHtml(props.status, i18n)}</div>${inspireRow}</div>
+          <div class="popup-footer">${escapeHtml(props.ZIPCODE || '')} ${escapeHtml(localMunicipality(props, i18n.dataLang))}</div>
           <div class="popup-links">
             <a href="${links.mapillary}" target="_blank" rel="noopener noreferrer">Mapillary</a>
             <a href="${links.panoramax}" target="_blank" rel="noopener noreferrer">Panoramax</a>
@@ -48,7 +49,7 @@ export function popupHtml(props, lng, lat, uid) {
             ${osmButton}</div></div>`;
 }
 
-export function initPopup(map, { isLassoActive }) {
+export function initPopup(map, { isLassoActive, i18n = getI18n() }) {
   map.on('click', ADDRESS_LAYER, e => {
     if (isLassoActive()) return;
     const props = e.features[0].properties;
@@ -56,7 +57,7 @@ export function initPopup(map, { isLassoActive }) {
     const uid = 'copy-' + Date.now();
     new maplibregl.Popup()
       .setLngLat(e.lngLat)
-      .setHTML(popupHtml(props, lng, lat, uid))
+      .setHTML(popupHtml(props, lng, lat, uid, i18n))
       .addTo(map);
     if (!props.INSPIRE_ID) return;
     const numericId = extractInspireId(props.INSPIRE_ID);
@@ -65,7 +66,7 @@ export function initPopup(map, { isLassoActive }) {
       if (copyButton) {
         copyButton.addEventListener('click', ev => {
           ev.stopPropagation();
-          navigator.clipboard.writeText(numericId).then(() => showToast(t('toast.copied')));
+          navigator.clipboard.writeText(numericId).then(() => showToast(i18n.t('toast.copied'), i18n));
         });
       }
       const downloadButton = document.getElementById('osm-dl-' + uid);

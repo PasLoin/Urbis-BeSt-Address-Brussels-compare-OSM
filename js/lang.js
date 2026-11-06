@@ -1,4 +1,4 @@
-import { currentLang } from './i18n.js';
+import { getI18n } from './i18n.js';
 
 export const LANG_STORAGE_KEY = 'urbis-osm-lang';
 
@@ -37,10 +37,10 @@ function goTo(href) {
   location.assign(href + location.hash);
 }
 
-export function redirectToSavedLanguage() {
+export function redirectToSavedLanguage(i18n = getI18n()) {
   const links = languageLinks();
   const target = redirectTarget({
-    pageLang: currentLang(),
+    pageLang: i18n.lang,
     isRoot: document.documentElement.dataset.root === 'true',
     savedChoice: readChoice(),
     available: Object.keys(links)
@@ -50,7 +50,7 @@ export function redirectToSavedLanguage() {
   return true;
 }
 
-export function initLanguageControl() {
+export function initLanguageControl(i18n = getI18n()) {
   const control = document.getElementById('lang-control');
   const toggle = document.getElementById('lang-toggle');
 
@@ -74,15 +74,15 @@ export function initLanguageControl() {
       e.preventDefault();
       saveChoice(link.dataset.lang);
       setMenuOpen(false);
-      if (link.dataset.lang !== currentLang()) goTo(link.href);
+      if (link.dataset.lang !== i18n.lang) goTo(link.href);
     });
   });
 }
 
-export function initLanguageBanner() {
+export function initLanguageBanner(i18n = getI18n()) {
   const links = languageLinks();
   const target = suggestedLang({
-    pageLang: currentLang(),
+    pageLang: i18n.lang,
     available: Object.keys(links),
     browserLanguages: navigator.languages,
     savedChoice: readChoice()
@@ -107,7 +107,7 @@ export function initLanguageBanner() {
     goTo(links[target]);
   });
   close.addEventListener('click', () => {
-    saveChoice(currentLang());
+    saveChoice(i18n.lang);
     banner.hidden = true;
   });
   banner.hidden = false;

@@ -10,11 +10,11 @@ from markupsafe import Markup
 ROOT = Path(__file__).resolve().parent
 TEMPLATE = 'index.html.j2'
 SITE_URL = 'https://pasloin.github.io/Urbis-BeSt-Address-Brussels-compare-OSM/'
-REFERENCE_LANG = 'fr'
-LANGS = {
-    'fr': {'path': '', 'og': 'fr_BE', 'name': 'Français'},
-    'en': {'path': 'en/', 'og': 'en_GB', 'name': 'English'},
-}
+LANGUAGES_FILE = ROOT / 'i18n' / 'languages.json'
+LANGUAGES = json.loads(LANGUAGES_FILE.read_text(encoding='utf-8'))
+REFERENCE_LANG = LANGUAGES['reference']
+TIME_ZONE = LANGUAGES['timeZone']
+LANGS = LANGUAGES['languages']
 BANNER_KEYS = {'text': 'banner.text', 'switch': 'banner.switch', 'dismiss': 'banner.dismiss'}
 STATIC = ['js', 'assets', 'style.css', 'taginfo.json']
 DATA = ['addresses.pmtiles', 'search-index.json', 'version.json']
@@ -66,6 +66,9 @@ def render_pages(out):
             is_root=conf['path'] == '',
             root='../' * conf['path'].count('/'),
             og_locale=conf['og'],
+            locale=conf['locale'],
+            data_lang=conf['data'],
+            time_zone=TIME_ZONE,
             canonical=SITE_URL + conf['path'],
             alternates=alternates,
             site_url=SITE_URL,
