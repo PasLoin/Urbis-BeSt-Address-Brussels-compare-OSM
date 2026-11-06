@@ -1,0 +1,9 @@
+{
+  "reference": "fr",
+  "timeZone": "Europe/Brussels",
+  "languages": {
+    "fr": { "path": "", "locale": "fr-BE", "og": "fr_BE", "name": "Français", "data": "fr" },
+    "en": { "path": "en/", "locale": "en-GB", "og": "en_GB", "name": "English", "data": "fr" },
+    "nl": { "path": "nl/", "locale": "nl-BE", "og": "nl_BE", "name": "Nederlands", "data": "nl" }
+  }
+}
