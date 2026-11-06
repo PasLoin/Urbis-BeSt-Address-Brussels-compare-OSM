@@ -67,12 +67,24 @@ export function urbisLanguages(primary = dataLang()) {
   return primary === 'nl' ? ['nl', 'fr'] : ['fr', 'nl'];
 }
 
-async function searchUrbis(query, maxResults) {
-  for (const lang of urbisLanguages()) {
-    const results = await searchUrbisIn(query, lang, maxResults);
-    if (results.length) return results;
+export async function searchAcrossLanguages(langs, searchIn) {
+  let answered = false;
+  let lastError = null;
+  for (const lang of langs) {
+    try {
+      const results = await searchIn(lang);
+      answered = true;
+      if (results.length) return results;
+    } catch (e) {
+      lastError = e;
+    }
   }
+  if (!answered && lastError) throw lastError;
   return [];
+}
+
+function searchUrbis(query, maxResults) {
+  return searchAcrossLanguages(urbisLanguages(), lang => searchUrbisIn(query, lang, maxResults));
 }
 
 async function searchUrbisIn(query, lang, maxResults) {
