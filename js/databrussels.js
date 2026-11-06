@@ -1,9 +1,9 @@
-import { currentLang } from './i18n.js';
+import { getI18n } from './i18n.js';
 
 export const DATABRUSSELS_HOST = 'databrussels.be';
 const DATABRUSSELS_LANGS = ['fr', 'nl', 'en'];
 
-export function localizedDatabrusselsUrl(url, lang = currentLang()) {
+export function localizedDatabrusselsUrl(url, lang = getI18n().lang) {
   if (!url) return null;
   let parsed;
   try {

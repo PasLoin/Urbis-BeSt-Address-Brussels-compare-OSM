@@ -1,5 +1,5 @@
 import { showToast } from './toast.js';
-import { t } from './i18n.js';
+import { getI18n } from './i18n.js';
 
 const THUMB_TILE = 'https://tile.openstreetmap.org/16/33560/21984.png';
 const ZINNEKE_ATTRIBUTION = '<a href="https://github.com/PasLoin/ZinnekeTiles" target="_blank">ZinnekeTiles</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>';
@@ -36,13 +36,13 @@ export const BASEMAPS = [
   }
 ];
 
-export function basemapLabel(bm) {
-  return bm.labelKey ? t(bm.labelKey) : bm.label;
+export function basemapLabel(bm, i18n = getI18n()) {
+  return bm.labelKey ? i18n.t(bm.labelKey) : bm.label;
 }
 
-export function basemapShort(bm) {
-  if (bm.shortKey) return t(bm.shortKey);
-  return bm.short || basemapLabel(bm);
+export function basemapShort(bm, i18n = getI18n()) {
+  if (bm.shortKey) return i18n.t(bm.shortKey);
+  return bm.short || basemapLabel(bm, i18n);
 }
 
 export function keepOverlays(prev, next) {
@@ -71,7 +71,7 @@ async function rasterizeSvg(svgText, size, pixelRatio) {
   }
 }
 
-export function initBasemaps(map) {
+export function initBasemaps(map, i18n = getI18n()) {
   const styleCache = {};
   let currentBasemap = 'osm';
   let request = 0;
@@ -134,7 +134,7 @@ export function initBasemaps(map) {
       btn.dataset.id = bm.id;
       btn.setAttribute('role', 'radio');
       btn.setAttribute('aria-checked', bm.id === currentBasemap ? 'true' : 'false');
-      const label = basemapLabel(bm);
+      const label = basemapLabel(bm, i18n);
       btn.title = label;
       btn.setAttribute('aria-label', label);
       const img = document.createElement('img');
@@ -143,7 +143,7 @@ export function initBasemaps(map) {
       img.loading = 'lazy';
       if (bm.thumbFilter) img.style.filter = bm.thumbFilter;
       const span = document.createElement('span');
-      span.textContent = basemapShort(bm);
+      span.textContent = basemapShort(bm, i18n);
       btn.append(img, span);
       btn.addEventListener('click', () => setBasemap(bm.id));
       return btn;
@@ -166,7 +166,7 @@ export function initBasemaps(map) {
       renderMenu();
     } catch (err) {
       console.error('Fond de carte indisponible :', err);
-      showToast(t('basemap.unavailable'));
+      showToast(i18n.t('basemap.unavailable'), i18n);
       if (btn) btn.classList.remove('loading');
     }
   }

@@ -1,7 +1,7 @@
-import { currentLang } from './i18n.js';
+import { getI18n } from './i18n.js';
 
-export function dataLang() {
-  return currentLang() === 'nl' ? 'nl' : 'fr';
+export function dataLang(i18n = getI18n()) {
+  return i18n.dataLang;
 }
 
 export function localStreet(props, lang = dataLang()) {

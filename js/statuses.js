@@ -1,4 +1,4 @@
-import { t } from './i18n.js';
+import { getI18n } from './i18n.js';
 
 export const STATUSES = [
   { code: 'ok', color: '#2ecc71', labelKey: 'status.ok', statsKey: 'stats.ok', barKey: 'bar.ok', visibleByDefault: false, exportable: true, coverage: true },
@@ -18,9 +18,9 @@ export function getStatus(code) {
   return STATUSES.find(s => s.code === code) || null;
 }
 
-export function statusLabel(code) {
+export function statusLabel(code, i18n = getI18n()) {
   const status = getStatus(code);
-  return status ? t(status.labelKey) : String(code);
+  return status ? i18n.t(status.labelKey) : String(code);
 }
 
 export function statusColorExpression() {

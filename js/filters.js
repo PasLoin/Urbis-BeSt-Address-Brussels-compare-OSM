@@ -1,5 +1,5 @@
 import { STATUSES } from './statuses.js';
-import { t } from './i18n.js';
+import { getI18n } from './i18n.js';
 
 export const ADDRESS_LAYER = 'addresses-points';
 
@@ -15,7 +15,7 @@ export function filterExpression(state) {
   return ['in', ['get', 'status'], ['literal', active]];
 }
 
-export function initFilters(map, container = document.getElementById('filters')) {
+export function initFilters(map, { i18n = getI18n(), container = document.getElementById('filters') } = {}) {
   const state = initialFilterState();
 
   function apply() {
@@ -38,7 +38,7 @@ export function initFilters(map, container = document.getElementById('filters'))
     const dot = document.createElement('span');
     dot.className = 'dot';
     dot.style.background = status.color;
-    label.append(input, dot, document.createTextNode(t(status.labelKey)));
+    label.append(input, dot, document.createTextNode(i18n.t(status.labelKey)));
     return label;
   }));
 
