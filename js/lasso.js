@@ -2,6 +2,7 @@ import { NON_EXPORTABLE } from './statuses.js';
 import { pointInPolygon } from './geometry.js';
 import { downloadOsmXml } from './osm-export.js';
 import { ADDRESS_LAYER } from './filters.js';
+import { t } from './i18n.js';
 
 export const LASSO_SOURCE = 'lasso-source';
 const MIN_DIST = 10;
@@ -22,6 +23,7 @@ export function initLasso(map) {
   const button = document.getElementById('lasso-btn');
   const panel = document.getElementById('lasso-panel');
   const countEl = document.getElementById('lasso-count');
+  const labelEl = document.getElementById('lasso-label');
   const canvas = map.getCanvas();
 
   function updatePolygon() {
@@ -79,6 +81,7 @@ export function initLasso(map) {
       }
     }
     countEl.textContent = selected.length;
+    labelEl.textContent = t('lasso.selected', { count: selected.length });
     panel.style.display = 'block';
     active = false;
     drawing = false;

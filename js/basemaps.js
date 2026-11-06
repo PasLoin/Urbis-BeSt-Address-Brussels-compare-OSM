@@ -1,4 +1,5 @@
 import { showToast } from './toast.js';
+import { t } from './i18n.js';
 
 const THUMB_TILE = 'https://tile.openstreetmap.org/16/33560/21984.png';
 const ZINNEKE_ATTRIBUTION = '<a href="https://github.com/PasLoin/ZinnekeTiles" target="_blank">ZinnekeTiles</a> © <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>';
@@ -30,10 +31,19 @@ export const BASEMAPS = [
     hideLayers: ['railway-tram*', 'railway-subway*', 'railway-tunnel-tram', 'railway-tunnel-subway']
   },
   {
-    id: 'nb', label: 'ZinnekeTiles Noir & Blanc', short: 'Zinneke N&B', thumb: ZINNEKE_BASE + 'assets/img/basemap-nb.png',
+    id: 'nb', labelKey: 'basemap.nbLabel', shortKey: 'basemap.nbShort', thumb: ZINNEKE_BASE + 'assets/img/basemap-nb.png',
     url: ZINNEKE_BASE + 'style.nb.json', attribution: ZINNEKE_ATTRIBUTION
   }
 ];
+
+export function basemapLabel(bm) {
+  return bm.labelKey ? t(bm.labelKey) : bm.label;
+}
+
+export function basemapShort(bm) {
+  if (bm.shortKey) return t(bm.shortKey);
+  return bm.short || basemapLabel(bm);
+}
 
 export function keepOverlays(prev, next) {
   const sources = { ...next.sources };
@@ -124,15 +134,16 @@ export function initBasemaps(map) {
       btn.dataset.id = bm.id;
       btn.setAttribute('role', 'radio');
       btn.setAttribute('aria-checked', bm.id === currentBasemap ? 'true' : 'false');
-      btn.title = bm.label;
-      btn.setAttribute('aria-label', bm.label);
+      const label = basemapLabel(bm);
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
       const img = document.createElement('img');
       img.src = bm.thumb;
       img.alt = '';
       img.loading = 'lazy';
       if (bm.thumbFilter) img.style.filter = bm.thumbFilter;
       const span = document.createElement('span');
-      span.textContent = bm.short || bm.label;
+      span.textContent = basemapShort(bm);
       btn.append(img, span);
       btn.addEventListener('click', () => setBasemap(bm.id));
       return btn;
@@ -155,7 +166,7 @@ export function initBasemaps(map) {
       renderMenu();
     } catch (err) {
       console.error('Fond de carte indisponible :', err);
-      showToast('Fond de carte indisponible');
+      showToast(t('basemap.unavailable'));
       if (btn) btn.classList.remove('loading');
     }
   }

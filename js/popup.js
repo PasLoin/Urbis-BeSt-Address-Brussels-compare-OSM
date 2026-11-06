@@ -1,4 +1,5 @@
-import { getStatus, statusDot } from './statuses.js';
+import { getStatus, statusDot, statusLabel } from './statuses.js';
+import { t } from './i18n.js';
 import { extractInspireId, inspireUrl, downloadOsmXml } from './osm-export.js';
 import { localStreet, localMunicipality } from './data-lang.js';
 import { escapeHtml } from './html.js';
@@ -8,8 +9,7 @@ import { ADDRESS_LAYER } from './filters.js';
 const BBOX_DELTA = 0.0008;
 
 export function statusLabelHtml(code) {
-  const status = getStatus(code);
-  return status ? `${statusDot(code)}${escapeHtml(status.label)}` : escapeHtml(code);
+  return getStatus(code) ? `${statusDot(code)}${escapeHtml(statusLabel(code))}` : escapeHtml(code);
 }
 
 export function externalLinks(lng, lat) {
@@ -27,11 +27,11 @@ export function popupHtml(props, lng, lat, uid) {
   const street = localStreet(props);
   const number = props.POLICENUM || '';
   const inspireRow = hasInspire
-    ? `<div class="popup-meta-row"><strong>INSPIRE :</strong>
+    ? `<div class="popup-meta-row"><strong>${escapeHtml(t('popup.inspire'))}</strong>
            <a href="${escapeHtml(inspireUrl(props.INSPIRE_ID))}" target="_blank" rel="noopener noreferrer" class="inspire-link">${escapeHtml(numericId)}</a>
-           <button class="copy-id-btn" id="${uid}" title="Copier l'ID">
+           <button class="copy-id-btn" id="${uid}" title="${escapeHtml(t('popup.copyId'))}">
              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-             copier
+             ${escapeHtml(t('popup.copy'))}
            </button></div>`
     : '';
   const osmButton = hasInspire ? `<button class="osm-xml-btn" id="osm-dl-${uid}">⬇ .osm</button>` : '';
@@ -39,7 +39,7 @@ export function popupHtml(props, lng, lat, uid) {
           <div class="popup-title"><strong>${escapeHtml(street.primary)} ${escapeHtml(number)}</strong><br>
             <small>${escapeHtml(street.secondary)} ${street.secondary ? escapeHtml(number) : ''}</small></div>
           <div class="popup-meta">
-            <div class="popup-meta-row"><strong>Statut :</strong> ${statusLabelHtml(props.status)}</div>${inspireRow}</div>
+            <div class="popup-meta-row"><strong>${escapeHtml(t('popup.status'))}</strong> ${statusLabelHtml(props.status)}</div>${inspireRow}</div>
           <div class="popup-footer">${escapeHtml(props.ZIPCODE || '')} ${escapeHtml(localMunicipality(props))}</div>
           <div class="popup-links">
             <a href="${links.mapillary}" target="_blank" rel="noopener noreferrer">Mapillary</a>
@@ -65,7 +65,7 @@ export function initPopup(map, { isLassoActive }) {
       if (copyButton) {
         copyButton.addEventListener('click', ev => {
           ev.stopPropagation();
-          navigator.clipboard.writeText(numericId).then(() => showToast('ID copié !'));
+          navigator.clipboard.writeText(numericId).then(() => showToast(t('toast.copied')));
         });
       }
       const downloadButton = document.getElementById('osm-dl-' + uid);

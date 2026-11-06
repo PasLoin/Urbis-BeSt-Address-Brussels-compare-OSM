@@ -1,11 +1,10 @@
-export const LOCALE = 'fr-BE';
-export const TIME_ZONE = 'Europe/Brussels';
+import { currentLocale, TIME_ZONE } from './i18n.js';
 
-export function formatNumber(value, locale = LOCALE) {
+export function formatNumber(value, locale = currentLocale()) {
   return new Intl.NumberFormat(locale).format(value);
 }
 
-export function formatPercent(ratio, locale = LOCALE) {
+export function formatPercent(ratio, locale = currentLocale()) {
   return new Intl.NumberFormat(locale, {
     style: 'percent',
     minimumFractionDigits: 3,
@@ -13,7 +12,7 @@ export function formatPercent(ratio, locale = LOCALE) {
   }).format(ratio);
 }
 
-export function formatDate(value, { withTime = false, locale = LOCALE } = {}) {
+export function formatDate(value, { withTime = false, locale = currentLocale() } = {}) {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
