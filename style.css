@@ -465,3 +465,12 @@ html, body, #map { height: 100%; margin: 0; }
   cursor: pointer;
 }
 #lang-banner-close:hover { color: #222; }
+@media (max-width: 480px) {
+  #lang-banner {
+    left: 10px;
+    right: 10px;
+    bottom: 110px;
+    transform: none;
+    max-width: none;
+  }
+}
