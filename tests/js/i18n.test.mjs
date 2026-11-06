@@ -4,7 +4,7 @@ import { createI18n, setI18n, t, currentLang, currentLocale } from '../../js/i18
 import { suggestedLang, redirectTarget, primaryBrowserLang } from '../../js/lang.js';
 import { generateOsmXml } from '../../js/osm-export.js';
 import { dataLang, localStreet } from '../../js/data-lang.js';
-import { buildUrbisUrl, urbisLanguages } from '../../js/search.js';
+import { buildUrbisUrl, urbisLanguages, searchAcrossLanguages } from '../../js/search.js';
 import { useLang } from './helpers.mjs';
 
 const DICT = {
@@ -105,4 +105,35 @@ test('le bandeau propose le n\u00e9erlandais aux navigateurs n\u00e9erlandophone
   const base = { pageLang: 'fr', available: ['fr', 'en', 'nl'], savedChoice: null };
   assert.equal(suggestedLang({ ...base, browserLanguages: ['nl-BE', 'fr'] }), 'nl');
   assert.equal(suggestedLang({ ...base, pageLang: 'nl', browserLanguages: ['nl-BE'] }), null);
+});
+
+test('la recherche passe \u00e0 l\u2019autre langue apr\u00e8s une erreur HTTP', async () => {
+  const calls = [];
+  const results = await searchAcrossLanguages(['fr', 'nl'], async lang => {
+    calls.push(lang);
+    if (lang === 'fr') throw new Error('UrbIS HTTP 404');
+    return [{ label: 'Wetstraat 16' }];
+  });
+  assert.deepEqual(calls, ['fr', 'nl']);
+  assert.deepEqual(results, [{ label: 'Wetstraat 16' }]);
+});
+
+test('la recherche passe \u00e0 l\u2019autre langue apr\u00e8s une r\u00e9ponse vide', async () => {
+  const results = await searchAcrossLanguages(['nl', 'fr'], async lang => (lang === 'nl' ? [] : [{ label: 'Rue de la Loi 16' }]));
+  assert.deepEqual(results, [{ label: 'Rue de la Loi 16' }]);
+});
+
+test('aucun r\u00e9sultat si une langue r\u00e9pond vide et l\u2019autre en erreur', async () => {
+  const results = await searchAcrossLanguages(['fr', 'nl'], async lang => {
+    if (lang === 'fr') return [];
+    throw new Error('UrbIS HTTP 404');
+  });
+  assert.deepEqual(results, []);
+});
+
+test('l\u2019erreur remonte si toutes les langues \u00e9chouent', async () => {
+  await assert.rejects(
+    searchAcrossLanguages(['fr', 'nl'], async lang => { throw new Error(`UrbIS HTTP 500 ${lang}`); }),
+    /UrbIS HTTP 500 nl/
+  );
 });
