@@ -38,6 +38,32 @@ A GitHub Actions workflow runs every day. It downloads the latest UrbIS release 
 
 Changes are listed in [changelog.md](changelog.md) (in French).
 
+## Development
+
+The page is plain HTML with ES modules in `js/`. The site published on GitHub Pages is generated into `_site/` by `build-site.py`, and the data files come from the `data-latest` release, which the daily `data.yml` workflow updates once the data passes `tests/test_data.py`.
+
+To run the site locally (Python 3.10 or later):
+
+```sh
+pip install -r requirements-dev.txt
+python3 fetch-data.py
+python3 build-site.py
+python3 serve-local.py --dir _site
+```
+
+Then open `http://127.0.0.1:8000/`. `serve-local.py` supports the byte-range requests PMTiles needs.
+
+Tests:
+
+```sh
+npm test
+python3 -m pytest tests/test_site.py tests/test_data.py
+python3 -m playwright install chromium
+python3 -m pytest tests/test_e2e.py
+```
+
+`npm test` needs Node.js 22 or later. The `site.yml` workflow runs all of these on every pull request and before each deployment.
+
 ## License
 
 The code in this repository is under the MIT license, see [LICENSE](LICENSE).

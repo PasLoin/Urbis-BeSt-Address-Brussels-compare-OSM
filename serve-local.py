@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
+import functools
 import os
 import re
-import sys
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
@@ -99,9 +100,13 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
 
 
 def main() -> None:
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
-    with ThreadingHTTPServer(("127.0.0.1", port), RangeRequestHandler) as httpd:
-        print(f"Serving with byte-range support on http://127.0.0.1:{port}")
+    parser = argparse.ArgumentParser(description="Serveur local avec support des requêtes Range.")
+    parser.add_argument("port", nargs="?", type=int, default=8000)
+    parser.add_argument("--dir", default=".", help="dossier à servir, par exemple _site")
+    args = parser.parse_args()
+    handler = functools.partial(RangeRequestHandler, directory=os.path.abspath(args.dir))
+    with ThreadingHTTPServer(("127.0.0.1", args.port), handler) as httpd:
+        print(f"Serving {args.dir} with byte-range support on http://127.0.0.1:{args.port}")
         httpd.serve_forever()
 
 

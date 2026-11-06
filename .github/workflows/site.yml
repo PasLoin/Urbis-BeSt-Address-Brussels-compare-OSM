@@ -1,0 +1,87 @@
+name: Site
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'addresses.pmtiles'
+      - 'search-index.json'
+      - 'version.json'
+  pull_request:
+  workflow_run:
+    workflows: [Data]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-test:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: JS tests
+        run: npm test
+
+      - name: Fetch data-latest
+        run: python fetch-data.py --dir data
+
+      - name: Build site
+        run: python build-site.py --data data --out _site
+
+      - name: Site and data tests
+        run: python -m pytest tests/test_site.py tests/test_data.py -v
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        continue-on-error: true
+        run: python -m pytest tests/test_e2e.py -v
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots-${{ github.run_id }}
+          path: screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build-test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.PAGES_FROM_ACTIONS == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
