@@ -51,7 +51,7 @@ jobs:
           if ! gh release view data-latest >/dev/null 2>&1; then
             gh release create data-latest \
               --title "Données UrbIS / OSM (dernière version valide)" \
-              --notes "Publiée automatiquement par data.yml après validation. Ne pas modifier à la main." \
+              --notes "Publiée automatiquement par data.yml après validation." \
               --prerelease \
               --latest=false
           fi
