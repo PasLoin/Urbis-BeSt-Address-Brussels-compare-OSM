@@ -1,0 +1,8 @@
+{
+  "name": "urbis-best-address-brussels-compare-osm",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"tests/js/*.test.mjs\""
+  }
+}
