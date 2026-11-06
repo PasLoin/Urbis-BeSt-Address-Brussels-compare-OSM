@@ -9,24 +9,27 @@ pytest.importorskip('pytest_playwright')
 playwright_sync = pytest.importorskip('playwright.sync_api')
 expect = playwright_sync.expect
 
+from site_config import LANGS, REFERENCE_LANG
+
 ROOT = Path(__file__).resolve().parent.parent
 SCREENSHOT_DIR = Path(os.environ.get('SCREENSHOT_DIR', 'screenshots'))
 VIEWPORTS = {'bureau': {'width': 1280, 'height': 800}, 'mobile': {'width': 390, 'height': 844}}
-LANG_PATHS = {'fr': '', 'en': 'en/'}
+LANG_PATHS = {lang: conf['path'] for lang, conf in LANGS.items()}
+TRANSLATED_LANGS = [lang for lang in LANGS if lang != REFERENCE_LANG]
 
 
 def dictionary(lang):
-    base = json.loads((ROOT / 'i18n' / 'fr.json').read_text(encoding='utf-8'))
+    base = json.loads((ROOT / 'i18n' / f'{REFERENCE_LANG}.json').read_text(encoding='utf-8'))
     own = json.loads((ROOT / 'i18n' / f'{lang}.json').read_text(encoding='utf-8'))
     return {**base, **own}
 
 
-def french_only_strings():
-    fr, en = dictionary('fr'), dictionary('en')
+def reference_only_strings(lang):
+    reference, translated = dictionary(REFERENCE_LANG), dictionary(lang)
     found = set()
-    for key, value in fr.items():
+    for key, value in reference.items():
         values = value.values() if isinstance(value, dict) else [value]
-        other = en[key].values() if isinstance(en[key], dict) else [en[key]]
+        other = translated[key].values() if isinstance(translated[key], dict) else [translated[key]]
         for text in values:
             text = re.sub(r'\{\w+\}', '', text).strip()
             if len(text) >= 5 and text not in other:
@@ -58,15 +61,16 @@ def test_chargement_sans_erreur(page, site_url, errors, lang):
     assert errors == []
 
 
-def test_aucun_texte_francais_en_anglais(page, site_url):
-    open_site(page, site_url, 'en')
-    expect(page.locator('#stats-rows .stats-row').first).to_contain_text('UrbIS total')
+@pytest.mark.parametrize('lang', TRANSLATED_LANGS)
+def test_aucun_texte_francais_dans_les_traductions(page, site_url, lang):
+    open_site(page, site_url, lang)
+    expect(page.locator('#stats-rows .stats-row').first).to_contain_text(dictionary(lang)['stats.total'])
     visible = page.locator('body').inner_text()
     attributes = page.evaluate(
         "[...document.querySelectorAll('[title],[aria-label],[placeholder]')]"
         ".flatMap(e => [e.title, e.getAttribute('aria-label'), e.placeholder]).filter(Boolean).join('\\n')"
     )
-    leaks = sorted(text for text in french_only_strings() if text in visible or text in attributes)
+    leaks = sorted(text for text in reference_only_strings(lang) if text in visible or text in attributes)
     assert leaks == []
 
 

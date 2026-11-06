@@ -6,11 +6,12 @@ from urllib.parse import urlparse
 
 import pytest
 
+from site_config import LANGS, REFERENCE_LANG, SITE_URL
+
 ROOT = Path(__file__).resolve().parent.parent
-SITE_URL = 'https://pasloin.github.io/Urbis-BeSt-Address-Brussels-compare-OSM/'
 PAGES = {
-    'index.html': {'lang': 'fr', 'url': SITE_URL, 'og': 'fr_BE'},
-    'en/index.html': {'lang': 'en', 'url': SITE_URL + 'en/', 'og': 'en_GB'},
+    f"{conf['path']}index.html": {'lang': lang, 'url': SITE_URL + conf['path'], 'og': conf['og']}
+    for lang, conf in LANGS.items()
 }
 EXPECTED_ALTERNATES = {(conf['lang'], conf['url']) for conf in PAGES.values()} | {('x-default', SITE_URL)}
 PUBLIC_FILES = [
@@ -85,7 +86,7 @@ def is_local(url):
 
 
 def dictionary(lang):
-    base = json.loads((ROOT / 'i18n' / 'fr.json').read_text(encoding='utf-8'))
+    base = json.loads((ROOT / 'i18n' / f'{REFERENCE_LANG}.json').read_text(encoding='utf-8'))
     own = json.loads((ROOT / 'i18n' / f'{lang}.json').read_text(encoding='utf-8'))
     return {**base, **own}
 
