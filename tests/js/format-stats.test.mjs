@@ -85,3 +85,19 @@ test('en anglais, la barre et les lignes sont traduites', () => {
   assert.match(html, /Missing<\/span><span>840 \(0\.371%\)/);
   assert.match(html, /Not in UrbIS \(verified\)<\/span><span>160</);
 });
+
+test('en n\u00e9erlandais, nombres, pourcentages et dates suivent nl-BE', () => {
+  useLang('nl');
+  assert.equal(formatNumber(226680), '226.680');
+  assert.equal(formatPercent(0.99177), '99,177%');
+  assert.equal(formatDate('2026-10-03'), '3 oktober 2026');
+  assert.equal(formatDate('2026-11-03T07:08:34Z', { withTime: true }), '3 november 2026 om 08:08');
+});
+
+test('en n\u00e9erlandais, la barre et les lignes sont traduites', () => {
+  useLang('nl');
+  assert.match(statsBarHtml(SAMPLE.stats), /title="Aanwezig: 99,177%"/);
+  const html = statsRowsHtml(SAMPLE.stats);
+  assert.match(html, /<span>Totaal UrbIS<\/span><strong>226\.680<\/strong>/);
+  assert.match(html, /Ontbrekend<\/span><span>840 \(0,371%\)/);
+});

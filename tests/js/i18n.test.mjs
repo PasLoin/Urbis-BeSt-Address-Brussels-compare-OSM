@@ -4,7 +4,7 @@ import { createI18n, setI18n, t, currentLang, currentLocale } from '../../js/i18
 import { suggestedLang, redirectTarget, primaryBrowserLang } from '../../js/lang.js';
 import { generateOsmXml } from '../../js/osm-export.js';
 import { dataLang, localStreet } from '../../js/data-lang.js';
-import { buildUrbisUrl } from '../../js/search.js';
+import { buildUrbisUrl, urbisLanguages } from '../../js/search.js';
 import { useLang } from './helpers.mjs';
 
 const DICT = {
@@ -83,4 +83,26 @@ test('la redirection n\u2019a lieu que depuis la racine et sur choix m\u00e9mori
   assert.equal(redirectTarget({ ...base, isRoot: true, savedChoice: null }), null);
   assert.equal(redirectTarget({ ...base, isRoot: true, savedChoice: 'nl' }), null);
   assert.equal(redirectTarget({ pageLang: 'en', available: ['fr', 'en'], isRoot: false, savedChoice: 'fr' }), null);
+});
+
+test('le pluriel du lasso existe en n\u00e9erlandais', () => {
+  useLang('nl');
+  assert.equal(t('lasso.selected', { count: 1 }), 'adres geselecteerd');
+  assert.equal(t('lasso.selected', { count: 0 }), 'adressen geselecteerd');
+  assert.equal(t('lasso.selected', { count: 4 }), 'adressen geselecteerd');
+});
+
+test('le g\u00e9ocodeur UrbIS essaie la langue des donn\u00e9es puis l\u2019autre', () => {
+  useLang('nl');
+  assert.deepEqual(urbisLanguages(), ['nl', 'fr']);
+  useLang('fr');
+  assert.deepEqual(urbisLanguages(), ['fr', 'nl']);
+  useLang('en');
+  assert.deepEqual(urbisLanguages(), ['fr', 'nl']);
+});
+
+test('le bandeau propose le n\u00e9erlandais aux navigateurs n\u00e9erlandophones', () => {
+  const base = { pageLang: 'fr', available: ['fr', 'en', 'nl'], savedChoice: null };
+  assert.equal(suggestedLang({ ...base, browserLanguages: ['nl-BE', 'fr'] }), 'nl');
+  assert.equal(suggestedLang({ ...base, pageLang: 'nl', browserLanguages: ['nl-BE'] }), null);
 });

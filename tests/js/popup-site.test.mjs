@@ -42,6 +42,31 @@ test('en anglais, le popup est traduit et garde les noms FR puis NL', () => {
   assert.doesNotMatch(html, /Statut|copier/);
 });
 
+test('en n\u00e9erlandais, le popup met la rue et la commune en n\u00e9erlandais', () => {
+  useLang('nl');
+  const html = popupHtml(ADDRESS, 4.3685, 50.8466, 'copy-1');
+  assert.match(html, /<strong>Status:<\/strong>/);
+  assert.match(html, /Ontbreekt in OSM/);
+  assert.match(html, /<strong>Wetstraat 16<\/strong><br>\s*<small>Rue de la Loi 16<\/small>/);
+  assert.match(html, /1000 Brussel/);
+  assert.match(html, /title="ID kopi\u00ebren"/);
+});
+
+test('en n\u00e9erlandais, une adresse OSM sans nom n\u00e9erlandais reste lisible', () => {
+  useLang('nl');
+  const html = popupHtml({
+    STRNAMEFRE: 'Rue X - X-straat',
+    STRNAMEDUT: null,
+    POLICENUM: '3',
+    ZIPCODE: '1000',
+    MUNNAMEFRE: 'Bruxelles',
+    MUNNAMEDUT: null,
+    status: 'missing_in_urbis'
+  }, 4.35, 50.85, 'copy-3');
+  assert.match(html, /<strong>Rue X - X-straat 3<\/strong>/);
+  assert.match(html, /1000 Bruxelles/);
+});
+
 test('le popup \u00e9chappe les noms venant d\u2019OSM', () => {
   useLang('fr');
   const html = popupHtml({
