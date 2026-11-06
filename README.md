@@ -2,7 +2,7 @@
 
 A map of the official Brussels-Capital Region addresses (UrbIS/BeSt) compared with OpenStreetMap, to find addresses that are missing from OSM.
 
-Live map: https://pasloin.github.io/Urbis-BeSt-Address-Brussels-compare-OSM/
+Live map, in French: https://pasloin.github.io/Urbis-BeSt-Address-Brussels-compare-OSM/ and in English: https://pasloin.github.io/Urbis-BeSt-Address-Brussels-compare-OSM/en/
 
 Address mapping in Brussels is best left to experienced mappers. Check the object history before you edit, and if you are unsure, verify on the ground or leave a note.
 
@@ -14,15 +14,15 @@ The filter panel shows or hides each status and gives coverage counts for the wh
 
 ## Address statuses
 
-The map interface is in French. This table gives the label shown on the map for each status.
+The map is available in French and English. This table gives the label shown on the map for each status.
 
-| Status | Map label | Meaning |
-| --- | --- | --- |
-| `ok` | Présente dans OSM | The address exists in OSM. |
-| `missing` | Manquante dans OSM | The address is in UrbIS but not in OSM. |
-| `verified_absent` | Vérifiée absente | A contributor checked on the ground and the address does not exist. |
-| `missing_in_urbis` | Absente d'UrbIS (à vérifier) | The address is in OSM but not in UrbIS, and nobody has checked it yet. |
-| `missing_in_urbis_verified` | Absente d'UrbIS (vérifiée) | The address is in OSM but not in UrbIS, and a contributor confirmed on the ground that it exists. |
+| Status | French label | English label | Meaning |
+| --- | --- | --- | --- |
+| `ok` | Présente dans OSM | Present in OSM | The address exists in OSM. |
+| `missing` | Manquante dans OSM | Missing from OSM | The address is in UrbIS but not in OSM. |
+| `verified_absent` | Vérifiée absente | Verified absent | A contributor checked on the ground and the address does not exist. |
+| `missing_in_urbis` | Absente d'UrbIS (à vérifier) | Not in UrbIS (to check) | The address is in OSM but not in UrbIS, and nobody has checked it yet. |
+| `missing_in_urbis_verified` | Absente d'UrbIS (vérifiée) | Not in UrbIS (verified) | The address is in OSM but not in UrbIS, and a contributor confirmed on the ground that it exists. |
 
 ## Matching
 
@@ -34,13 +34,13 @@ An address is `verified_absent` when OSM carries `not:addr:street` / `not:addr:h
 
 ## Data updates
 
-A GitHub Actions workflow runs every day. It downloads the latest UrbIS release and the OSM extract for Brussels, then rebuilds the vector tiles and the search index. The filter panel shows the date of each source.
+A GitHub Actions workflow runs every day. It downloads the latest UrbIS release and the OSM extract for Brussels, rebuilds the vector tiles and the search index, and publishes them in the `data-latest` release once they pass validation. The filter panel shows the date of each source.
 
 Changes are listed in [changelog.md](changelog.md) (in French).
 
 ## Development
 
-The page is plain HTML with ES modules in `js/`. The site published on GitHub Pages is generated into `_site/` by `build-site.py`, and the data files come from the `data-latest` release, which the daily `data.yml` workflow updates once the data passes `tests/test_data.py`.
+The page is built from the Jinja template `templates/index.html.j2` and ES modules in `js/`. The site published on GitHub Pages is generated into `_site/` by `build-site.py`, one page per language, and the data files come from the `data-latest` release, which the daily `data.yml` workflow updates once the data passes `tests/test_data.py`.
 
 To run the site locally (Python 3.10 or later):
 
@@ -56,6 +56,7 @@ Then open `http://127.0.0.1:8000/`. `serve-local.py` supports the byte-range req
 Tests:
 
 ```sh
+python3 check-i18n.py
 npm test
 python3 -m pytest tests/test_site.py tests/test_data.py
 python3 -m playwright install chromium
@@ -64,10 +65,16 @@ python3 -m pytest tests/test_e2e.py
 
 `npm test` needs Node.js 22 or later. The `site.yml` workflow runs all of these on every pull request and before each deployment.
 
+## Translations
+
+Every piece of interface text lives in `i18n/fr.json`, the reference, and has the same key in each other language file, such as `i18n/en.json`. `build-site.py` generates one page per language from `templates/index.html.j2` and inlines that page's dictionary, which the JavaScript reads through `t()` in `js/i18n.js`.
+
+To add a text, add its key to every file in `i18n/`, then use `{{ t('my.key') }}` in the template or `t('my.key')` in the JavaScript. A key whose text depends on a number takes `one` and `other` forms, chosen by `Intl.PluralRules`. `check-i18n.py` fails if a key is missing in a language, if the `{variables}` differ between languages, or if French text is written directly in the template or the JavaScript.
+
 ## License
 
 The code in this repository is under the MIT license, see [LICENSE](LICENSE).
 
 The data has its own licenses. OpenStreetMap data is © OpenStreetMap contributors and available under the [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/). UrbIS data from the Brussels-Capital Region is released under [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
 
-The generated files committed here are derived from OpenStreetMap and therefore fall under the ODbL, not the MIT license. `search-index.json` is built from the OSM extract. `addresses.pmtiles.gz` combines UrbIS addresses with a status computed from OSM data.
+The generated files published in the `data-latest` release are derived from OpenStreetMap and therefore fall under the ODbL, not the MIT license. `search-index.json` is built from the OSM extract. `addresses.pmtiles` combines UrbIS addresses with a status computed from OSM data.
