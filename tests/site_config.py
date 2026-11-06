@@ -15,3 +15,4 @@ _build_site = _load_build_site()
 LANGS = _build_site.LANGS
 REFERENCE_LANG = _build_site.REFERENCE_LANG
 SITE_URL = _build_site.SITE_URL
+TIME_ZONE = _build_site.TIME_ZONE

@@ -41,6 +41,7 @@ def reference_only_strings(lang):
 def errors(page):
     collected = []
     page.on('pageerror', lambda exc: collected.append(str(exc)))
+    page.on('console', lambda msg: collected.append(msg.text) if msg.text.startswith('[i18n]') else None)
     return collected
 
 

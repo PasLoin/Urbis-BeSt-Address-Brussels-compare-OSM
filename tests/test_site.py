@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import pytest
 
-from site_config import LANGS, REFERENCE_LANG, SITE_URL
+from site_config import LANGS, REFERENCE_LANG, SITE_URL, TIME_ZONE
 
 ROOT = Path(__file__).resolve().parent.parent
 PAGES = {
@@ -34,6 +34,7 @@ class PageParser(HTMLParser):
         self.meta_all = []
         self.canonical = None
         self.lang = None
+        self.html_attrs = {}
         self.title = ''
         self.scripts = {}
         self._in = None
@@ -42,6 +43,7 @@ class PageParser(HTMLParser):
         a = dict(attrs)
         if tag == 'html':
             self.lang = a.get('lang')
+            self.html_attrs = a
         if tag in ('script', 'img') and a.get('src'):
             self.links.append(a['src'])
         if tag == 'a' and a.get('href'):
@@ -169,3 +171,12 @@ def test_pas_de_fichiers_de_travail_publies(site_dir):
     published = {p.name for p in site_dir.iterdir()}
     for name in ('tests', 'templates', 'i18n', 'node_modules', '.github', 'fetch-latest.py', 'build-site.py', 'README.md'):
         assert name not in published
+
+
+@pytest.mark.parametrize('page', PAGES)
+def test_configuration_de_langue_posee_sur_la_page(site_dir, page):
+    lang = PAGES[page]['lang']
+    attrs = parse(site_dir / page).html_attrs
+    assert attrs.get('data-locale') == LANGS[lang]['locale']
+    assert attrs.get('data-data-lang') == LANGS[lang]['data']
+    assert attrs.get('data-time-zone') == TIME_ZONE
