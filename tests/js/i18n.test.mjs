@@ -4,7 +4,7 @@ import { createI18n, setI18n, t, currentLang, currentLocale } from '../../js/i18
 import { suggestedLang, redirectTarget, primaryBrowserLang } from '../../js/lang.js';
 import { generateOsmXml } from '../../js/osm-export.js';
 import { dataLang, localStreet } from '../../js/data-lang.js';
-import { buildUrbisUrl, urbisLanguages, searchAcrossLanguages } from '../../js/search.js';
+import { buildUrbisUrl, urbisLanguages, searchAcrossLanguages, localizedDatabrusselsUrl, streetNameUrl } from '../../js/search.js';
 import { useLang } from './helpers.mjs';
 
 const DICT = {
@@ -136,4 +136,36 @@ test('l\u2019erreur remonte si toutes les langues \u00e9chouent', async () => {
     searchAcrossLanguages(['fr', 'nl'], async lang => { throw new Error(`UrbIS HTTP 500 ${lang}`); }),
     /UrbIS HTTP 500 nl/
   );
+});
+
+test('le lien databrussels suit la langue de la page', () => {
+  const raw = 'https://databrussels.be/id/streetname/1679/1';
+  assert.equal(localizedDatabrusselsUrl(raw, 'nl'), 'https://databrussels.be/nl/id/streetname/1679/1');
+  assert.equal(localizedDatabrusselsUrl(raw, 'fr'), 'https://databrussels.be/fr/id/streetname/1679/1');
+  assert.equal(localizedDatabrusselsUrl(raw, 'en'), 'https://databrussels.be/en/id/streetname/1679/1');
+  assert.equal(localizedDatabrusselsUrl('https://databrussels.be/fr/id/streetname/1679/1', 'nl'), 'https://databrussels.be/nl/id/streetname/1679/1');
+  useLang('nl');
+  assert.equal(localizedDatabrusselsUrl(raw), 'https://databrussels.be/nl/id/streetname/1679/1');
+});
+
+test('un lien qui n\u2019est pas databrussels reste inchang\u00e9', () => {
+  assert.equal(localizedDatabrusselsUrl('https://example.org/id/streetname/1679/1', 'nl'), 'https://example.org/id/streetname/1679/1');
+  assert.equal(localizedDatabrusselsUrl('pas une url', 'nl'), 'pas une url');
+  assert.equal(localizedDatabrusselsUrl(null, 'nl'), null);
+});
+
+test('le lien de rue se construit depuis href ou depuis le code BeSt', () => {
+  assert.equal(
+    streetNameUrl({ href: 'https://databrussels.be/id/streetname/1679/1' }, 'en'),
+    'https://databrussels.be/en/id/streetname/1679/1'
+  );
+  assert.equal(
+    streetNameUrl({ code: { objectIdentifier: '1679', versionIdentifier: '1' } }, 'fr'),
+    'https://databrussels.be/fr/id/streetname/1679/1'
+  );
+  assert.equal(
+    streetNameUrl({ code: { objectIdentifier: '1679' } }, 'nl'),
+    'https://databrussels.be/nl/id/streetname/1679'
+  );
+  assert.equal(streetNameUrl({}, 'fr'), null);
 });
