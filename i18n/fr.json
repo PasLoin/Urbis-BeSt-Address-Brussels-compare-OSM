@@ -19,7 +19,7 @@
   "search.searching": "Recherche…",
   "search.noResultOsm": "Aucun résultat dans OSM",
   "search.noResultUrbis": "Aucun résultat UrbIS",
-  "search.pressEnter": "↵  Appuyez sur Entrée pour rechercher",
+  "search.pressEnter": "↵ Appuyez sur Entrée pour rechercher",
   "search.error": "Erreur",
   "search.networkError": "Réseau : {message}",
   "search.proj4Unavailable": "proj4.js indisponible",
