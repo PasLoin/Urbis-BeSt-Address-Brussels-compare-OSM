@@ -2,6 +2,7 @@ import { escapeHtml } from './html.js';
 import { fuzzyScore, highlight, searchIndex, splitQuery } from './search-match.js';
 import { dataLang, pickName } from './data-lang.js';
 import { t, currentLang } from './i18n.js';
+import { DATABRUSSELS_HOST, localizedDatabrusselsUrl } from './databrussels.js';
 import { siteUrl } from './paths.js';
 
 const URBIS_BASE = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
@@ -61,23 +62,6 @@ export function buildUrbisUrl(query, lang = dataLang()) {
   if (number) url.searchParams.set('policeNumber', number);
   url.searchParams.set('model', 'BeStPlus');
   return url;
-}
-
-const DATABRUSSELS_HOST = 'databrussels.be';
-const DATABRUSSELS_LANGS = ['fr', 'nl', 'en'];
-
-export function localizedDatabrusselsUrl(url, lang = currentLang()) {
-  if (!url) return null;
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch (e) {
-    return url;
-  }
-  if (parsed.hostname !== DATABRUSSELS_HOST || !DATABRUSSELS_LANGS.includes(lang)) return url;
-  const path = parsed.pathname.replace(/^\/(fr|nl|en)(?=\/)/, '');
-  parsed.pathname = `/${lang}${path}`;
-  return parsed.href;
 }
 
 export function streetNameUrl(streetName, lang = currentLang()) {

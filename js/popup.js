@@ -1,5 +1,6 @@
 import { getStatus, statusDot, statusLabel } from './statuses.js';
 import { t } from './i18n.js';
+import { localizedDatabrusselsUrl } from './databrussels.js';
 import { extractInspireId, inspireUrl, downloadOsmXml } from './osm-export.js';
 import { localStreet, localMunicipality } from './data-lang.js';
 import { escapeHtml } from './html.js';
@@ -28,7 +29,7 @@ export function popupHtml(props, lng, lat, uid) {
   const number = props.POLICENUM || '';
   const inspireRow = hasInspire
     ? `<div class="popup-meta-row"><strong>${escapeHtml(t('popup.inspire'))}</strong>
-           <a href="${escapeHtml(inspireUrl(props.INSPIRE_ID))}" target="_blank" rel="noopener noreferrer" class="inspire-link">${escapeHtml(numericId)}</a>
+           <a href="${escapeHtml(localizedDatabrusselsUrl(inspireUrl(props.INSPIRE_ID)))}" target="_blank" rel="noopener noreferrer" class="inspire-link">${escapeHtml(numericId)}</a>
            <button class="copy-id-btn" id="${uid}" title="${escapeHtml(t('popup.copyId'))}">
              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
              ${escapeHtml(t('popup.copy'))}
