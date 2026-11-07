@@ -55,5 +55,8 @@
   "popup.copyId": "Copier l'ID",
   "popup.copy": "copier",
   "toast.copied": "ID copié !",
-  "attribution.addresses": "Adresses :"
+  "attribution.addresses": "Adresses :",
+  "notFound.title": "Page introuvable",
+  "notFound.text": "Cette adresse n’existe pas sur ce site.",
+  "notFound.back": "Retour à la carte des adresses"
 }
