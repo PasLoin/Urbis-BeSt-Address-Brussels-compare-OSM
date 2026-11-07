@@ -1,24 +1,76 @@
 name: CI
 on:
-  pull_request:
-  push:
-    branches: [main]
-    paths:
-      - 'index.html'
-      - 'style.css'
-      - 'js/**'
-      - 'tests/**'
-      - 'package.json'
-      - '.github/workflows/ci.yml'
   workflow_dispatch:
+    inputs:
+      e2e:
+        description: 'Lancer les tests Playwright'
+        type: boolean
+        default: true
 permissions:
   contents: read
 jobs:
+  i18n:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Translation check
+        run: python check-i18n.py
+
   js-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: npm test
+
+      - name: JS tests
+        run: npm test
+
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Fetch data-latest
+        run: python fetch-data.py --dir data
+
+      - name: Data tests
+        run: python -m pytest tests/test_data.py -v
+
+      - name: Build site
+        run: python build-site.py --data data --out _site
+
+      - name: Site tests
+        run: python -m pytest tests/test_site.py -v
+
+      - name: Install Chromium
+        if: inputs.e2e
+        run: python -m playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        if: inputs.e2e
+        run: python -m pytest tests/test_e2e.py -v
+
+      - name: Upload screenshots
+        if: always() && inputs.e2e
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots-${{ github.run_id }}
+          path: screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
