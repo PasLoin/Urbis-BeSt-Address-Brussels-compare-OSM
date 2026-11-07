@@ -55,5 +55,8 @@
   "popup.copyId": "ID kopiëren",
   "popup.copy": "Kopiëren",
   "toast.copied": "ID gekopieerd!",
-  "attribution.addresses": "Adressen:"
+  "attribution.addresses": "Adressen:",
+  "notFound.title": "Pagina niet gevonden",
+  "notFound.text": "Dit adres bestaat niet op deze site.",
+  "notFound.back": "Terug naar de adressenkaart"
 }

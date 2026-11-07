@@ -1,5 +1,6 @@
 import json
 import re
+import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
@@ -22,7 +23,10 @@ PUBLIC_FILES = [
     'addresses.pmtiles',
     'search-index.json',
     'version.json',
+    'sitemap.xml',
+    '404.html',
 ]
+SITEMAP_NS = {'s': 'http://www.sitemaps.org/schemas/sitemap/0.9', 'x': 'http://www.w3.org/1999/xhtml'}
 
 
 class PageParser(HTMLParser):
@@ -180,3 +184,28 @@ def test_configuration_de_langue_posee_sur_la_page(site_dir, page):
     assert attrs.get('data-locale') == LANGS[lang]['locale']
     assert attrs.get('data-data-lang') == LANGS[lang]['data']
     assert attrs.get('data-time-zone') == TIME_ZONE
+
+
+def test_sitemap_liste_les_langues_avec_hreflang(site_dir):
+    root = ET.parse(site_dir / 'sitemap.xml').getroot()
+    urls = root.findall('s:url', SITEMAP_NS)
+    assert {u.findtext('s:loc', namespaces=SITEMAP_NS) for u in urls} == {conf['url'] for conf in PAGES.values()}
+    for url in urls:
+        links = {(l.get('hreflang'), l.get('href')) for l in url.findall('x:link', SITEMAP_NS)}
+        assert links == EXPECTED_ALTERNATES
+        lastmod = url.findtext('s:lastmod', namespaces=SITEMAP_NS)
+        assert lastmod is None or re.fullmatch(r'\d{4}-\d{2}-\d{2}', lastmod)
+
+
+def test_page_404(site_dir):
+    html = (site_dir / '404.html').read_text(encoding='utf-8')
+    page = parse(site_dir / '404.html')
+    assert page.lang == REFERENCE_LANG
+    assert re.search(r'<meta name="robots" content="noindex">', html)
+    assert {conf['url'] for conf in PAGES.values()} <= set(page.links)
+    assert all(not is_local(link) for link in page.links)
+    for lang in LANGS:
+        strings = dictionary(lang)
+        assert f'lang="{lang}"' in html
+        for key in ('notFound.title', 'notFound.text', 'notFound.back'):
+            assert strings[key] in html

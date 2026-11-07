@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="{{ reference_lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>404 · {{ site_name }}</title>
+  <link rel="icon" href="{{ site_url }}assets/img/favicon.ico" sizes="any">
+  <style>
+    :root { color-scheme: light dark; --bg: #f5f7fb; --fg: #1d2433; --muted: #5a6478; --accent: #1a3a8f; --card: #fff; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #11151f; --fg: #e6e9f0; --muted: #a0a8b8; --accent: #8fb0ff; --card: #1a2030; } }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 34rem; padding: 2rem 1.25rem; }
+    .code { font-size: 3.5rem; font-weight: 700; color: var(--accent); margin: 0 0 1rem; }
+    section { background: var(--card); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: .75rem; }
+    h1 { font-size: 1.15rem; margin: 0 0 .25rem; }
+    p { margin: 0 0 .5rem; color: var(--muted); }
+    a { color: var(--accent); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="code" aria-hidden="true">404</div>
+{%- for p in pages %}
+    <section lang="{{ p.lang }}">
+      <h1>{{ p.t('notFound.title') }}</h1>
+      <p>{{ p.t('notFound.text') }}</p>
+      <a href="{{ p.url }}" hreflang="{{ p.lang }}">{{ p.t('notFound.back') }}</a>
+    </section>
+{%- endfor %}
+  </main>
+</body>
+</html>
