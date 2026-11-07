@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-07
+
+### Ajouté
+
+- **Traduction** - L'application est désormais disponible en français, néerlandais et anglais.
+- **Refonte complète du déploiement** - Utilisation d'un moteur de template pour générer le HTML servi sur la page github.io, déploiement en deux phases avec CI entre les deux (Data -> Site).
+  
 ## 2026-10-30
 
 ### Ajouté
