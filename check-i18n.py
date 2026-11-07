@@ -8,7 +8,7 @@ I18N_DIR = ROOT / 'i18n'
 LANGUAGES_FILE = I18N_DIR / 'languages.json'
 LANGUAGE_FIELDS = {'path', 'locale', 'og', 'name', 'data'}
 DATA_LANGS = {'fr', 'nl'}
-TEMPLATE = ROOT / 'templates' / 'index.html.j2'
+TEMPLATES = [ROOT / 'templates' / 'index.html.j2', ROOT / 'templates' / '404.html.j2']
 JS_DIR = ROOT / 'js'
 PLURAL_FORMS = {'zero', 'one', 'two', 'few', 'many', 'other'}
 PLACEHOLDER = re.compile(r'\{(\w+)\}')
@@ -51,8 +51,9 @@ def used_keys():
     for path in sorted(JS_DIR.glob('*.js')):
         for match in KEY_IN_JS.finditer(path.read_text(encoding='utf-8')):
             keys.setdefault(match.group(1) or match.group(2), path.name)
-    for match in KEY_IN_TEMPLATE.finditer(TEMPLATE.read_text(encoding='utf-8')):
-        keys.setdefault(match.group(1), TEMPLATE.name)
+    for template in TEMPLATES:
+        for match in KEY_IN_TEMPLATE.finditer(template.read_text(encoding='utf-8')):
+            keys.setdefault(match.group(1), template.name)
     for key in ('banner.text', 'banner.switch', 'banner.dismiss'):
         keys.setdefault(key, 'build-site.py')
     return keys
@@ -67,13 +68,14 @@ def hardcoded_french():
             for literal in STRING_LITERAL.findall(line):
                 if FRENCH_LETTERS.search(literal):
                     found.append(f'{path.name}:{number} : {literal[:60]}')
-    template = SCRIPT_OR_STYLE.sub('', JINJA_BLOCK.sub('', TEMPLATE.read_text(encoding='utf-8')))
-    texts = [m.group(1) for m in TEXT_NODE.finditer(template)]
-    texts += [m.group(2) for m in TEXT_ATTRIBUTE.finditer(template)]
-    for text in texts:
-        words = [w for w in WORD.findall(re.sub(r'&#?\w+;', '', text)) if w not in TEMPLATE_ALLOWED_WORDS]
-        if words:
-            found.append(f'{TEMPLATE.name} : « {" ".join(text.split())[:60]} »')
+    for path in TEMPLATES:
+        template = SCRIPT_OR_STYLE.sub('', JINJA_BLOCK.sub('', path.read_text(encoding='utf-8')))
+        texts = [m.group(1) for m in TEXT_NODE.finditer(template)]
+        texts += [m.group(2) for m in TEXT_ATTRIBUTE.finditer(template)]
+        for text in texts:
+            words = [w for w in WORD.findall(re.sub(r'&#?\w+;', '', text)) if w not in TEMPLATE_ALLOWED_WORDS]
+            if words:
+                found.append(f'{path.name} : « {" ".join(text.split())[:60]} »')
     return found
 
 
