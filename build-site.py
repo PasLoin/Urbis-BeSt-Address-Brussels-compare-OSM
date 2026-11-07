@@ -3,12 +3,14 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from markupsafe import Markup
 
 ROOT = Path(__file__).resolve().parent
 TEMPLATE = 'index.html.j2'
+NOT_FOUND_TEMPLATE = '404.html.j2'
 SITE_URL = 'https://pasloin.github.io/Urbis-BeSt-Address-Brussels-compare-OSM/'
 LANGUAGES_FILE = ROOT / 'i18n' / 'languages.json'
 LANGUAGES = json.loads(LANGUAGES_FILE.read_text(encoding='utf-8'))
@@ -40,13 +42,17 @@ def copy(src, dst):
         shutil.copy2(src, dst)
 
 
-def render_pages(out):
-    env = Environment(
+def environment():
+    return Environment(
         loader=FileSystemLoader(ROOT / 'templates'),
         autoescape=True,
         undefined=StrictUndefined,
         keep_trailing_newline=True,
     )
+
+
+def render_pages(out):
+    env = environment()
     template = env.get_template(TEMPLATE)
     strings = {lang: load_strings(lang) for lang in LANGS}
     alternates = [
@@ -78,6 +84,51 @@ def render_pages(out):
         ), encoding='utf-8')
 
 
+def render_not_found(out):
+    template = environment().get_template(NOT_FOUND_TEMPLATE)
+    strings = {lang: load_strings(lang) for lang in LANGS}
+    pages = [
+        {'lang': lang, 'url': SITE_URL + conf['path'], 't': strings[lang].__getitem__}
+        for lang, conf in LANGS.items()
+    ]
+    (out / '404.html').write_text(template.render(
+        reference_lang=REFERENCE_LANG,
+        site_name=strings[REFERENCE_LANG]['meta.siteName'],
+        site_url=SITE_URL,
+        pages=pages,
+    ), encoding='utf-8')
+
+
+def last_modified(data_dir):
+    try:
+        version = json.loads((data_dir / 'version.json').read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return None
+    date = version.get('osm_date') or version.get('urbis_date')
+    return date[:10] if isinstance(date, str) and len(date) >= 10 else None
+
+
+def render_sitemap(out, lastmod=None):
+    alternates = [(lang, SITE_URL + conf['path']) for lang, conf in LANGS.items()]
+    alternates.append(('x-default', SITE_URL))
+    links = ''.join(
+        f'    <xhtml:link rel="alternate" hreflang="{lang}" href="{escape(url)}"/>\n'
+        for lang, url in alternates
+    )
+    modified = f'    <lastmod>{lastmod}</lastmod>\n' if lastmod else ''
+    urls = ''.join(
+        f'  <url>\n    <loc>{escape(SITE_URL + conf["path"])}</loc>\n{modified}{links}  </url>\n'
+        for conf in LANGS.values()
+    )
+    (out / 'sitemap.xml').write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
+        'xmlns:xhtml="http://www.w3.org/1999/xhtml">\n'
+        f'{urls}</urlset>\n',
+        encoding='utf-8',
+    )
+
+
 def build(data_dir, out):
     missing = [name for name in DATA if not (data_dir / name).is_file()]
     if missing:
@@ -85,6 +136,8 @@ def build(data_dir, out):
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     render_pages(out)
+    render_not_found(out)
+    render_sitemap(out, last_modified(data_dir))
     for name in STATIC:
         copy(ROOT / name, out / name)
     for name in DATA:
