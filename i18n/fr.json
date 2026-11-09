@@ -8,7 +8,6 @@
   "meta.ldDescription": "Carte des adresses officielles UrbIS de la Région de Bruxelles-Capitale comparées à OpenStreetMap pour repérer les adresses manquantes.",
   "meta.region": "Région de Bruxelles-Capitale",
   "lasso.title": "Sélection lasso",
-  "lasso.label": "Lasso",
   "lasso.selected": { "one": "adresse sélectionnée", "other": "adresses sélectionnées" },
   "lasso.export": "Exporter .osm",
   "lasso.cancel": "Annuler",

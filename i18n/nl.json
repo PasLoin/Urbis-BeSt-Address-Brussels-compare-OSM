@@ -8,7 +8,6 @@
   "meta.ldDescription": "Kaart van de officiële UrbIS-adressen van het Brussels Hoofdstedelijk Gewest, vergeleken met OpenStreetMap om ontbrekende adressen op te sporen.",
   "meta.region": "Brussels Hoofdstedelijk Gewest",
   "lasso.title": "Lassoselectie",
-  "lasso.label": "Lasso",
   "lasso.selected": { "one": "adres geselecteerd", "other": "adressen geselecteerd" },
   "lasso.export": ".osm exporteren",
   "lasso.cancel": "Annuleren",
