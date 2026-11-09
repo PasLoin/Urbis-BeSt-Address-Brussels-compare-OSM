@@ -68,22 +68,24 @@ html, body, #map { height: 100%; margin: 0; }
   top: 10px;
   left: 10px;
   z-index: 1001;
+  box-sizing: border-box;
+  width: 40px;
+  height: 40px;
+  padding: 0;
   background: #fff;
   border: 2px solid rgba(0,0,0,.2);
   border-radius: 8px;
-  padding: 6px 12px;
+  color: #555;
   cursor: pointer;
-  font-size: 13px;
-  font-family: sans-serif;
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
   box-shadow: 0 2px 8px rgba(0,0,0,.2);
   transition: background .15s, color .15s;
 }
-#lasso-btn:hover { background: #f0f0f0; }
+#lasso-btn:hover { background: #f0f0f0; color: #222; }
 #lasso-btn.active { background: #3498db; color: #fff; border-color: #2980b9; }
-#lasso-btn svg { width: 16px; height: 16px; }
+#lasso-btn svg { width: 20px; height: 20px; }
 
 /* ─── Lasso selection panel ─────────────────────── */
 #lasso-panel {
@@ -177,12 +179,13 @@ html, body, #map { height: 100%; margin: 0; }
 
 #basemap-control {
   position: absolute;
-  top: 102px;
+  top: 106px;
   left: 10px;
   z-index: 1000;
   font-family: sans-serif;
 }
 #basemap-toggle {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -239,7 +242,7 @@ html, body, #map { height: 100%; margin: 0; }
 
 #search-control {
   position: absolute;
-  top: 54px;
+  top: 58px;
   left: 10px;
   z-index: 1001;
   font-family: sans-serif;
@@ -269,7 +272,7 @@ html, body, #map { height: 100%; margin: 0; }
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #444;
+  color: #555;
   flex-shrink: 0;
   transition: background .12s;
 }
@@ -384,12 +387,13 @@ html, body, #map { height: 100%; margin: 0; }
 
 #lang-control {
   position: absolute;
-  top: 150px;
+  top: 154px;
   left: 10px;
   z-index: 1000;
   font-family: sans-serif;
 }
 #lang-toggle {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;

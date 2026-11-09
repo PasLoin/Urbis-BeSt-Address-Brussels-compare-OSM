@@ -8,7 +8,6 @@
   "meta.ldDescription": "Map of the official UrbIS addresses of the Brussels-Capital Region compared with OpenStreetMap to find missing addresses.",
   "meta.region": "Brussels-Capital Region",
   "lasso.title": "Lasso selection",
-  "lasso.label": "Lasso",
   "lasso.selected": { "one": "address selected", "other": "addresses selected" },
   "lasso.export": "Export .osm",
   "lasso.cancel": "Cancel",
