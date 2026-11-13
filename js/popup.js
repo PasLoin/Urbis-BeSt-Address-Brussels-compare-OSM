@@ -5,6 +5,7 @@ import { extractInspireId, inspireUrl, downloadOsmXml } from './osm-export.js';
 import { localStreet, localMunicipality } from './data-lang.js';
 import { escapeHtml } from './html.js';
 import { showToast } from './toast.js';
+import { announce } from './announce.js';
 import { ADDRESS_LAYER } from './filters.js';
 
 const BBOX_DELTA = 0.0008;
@@ -30,12 +31,12 @@ export function popupHtml(props, lng, lat, uid, i18n = getI18n()) {
   const inspireRow = hasInspire
     ? `<div class="popup-meta-row"><strong>${escapeHtml(i18n.t('popup.inspire'))}</strong>
            <a href="${escapeHtml(localizedDatabrusselsUrl(inspireUrl(props.INSPIRE_ID), i18n.lang))}" target="_blank" rel="noopener noreferrer" class="inspire-link">${escapeHtml(numericId)}</a>
-           <button class="copy-id-btn" id="${uid}" title="${escapeHtml(i18n.t('popup.copyId'))}">
-             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+           <button type="button" class="copy-id-btn" id="${uid}" title="${escapeHtml(i18n.t('popup.copyId'))}">
+             <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
              ${escapeHtml(i18n.t('popup.copy'))}
            </button></div>`
     : '';
-  const osmButton = hasInspire ? `<button class="osm-xml-btn" id="osm-dl-${uid}">⬇ .osm</button>` : '';
+  const osmButton = hasInspire ? `<button type="button" class="osm-xml-btn" id="osm-dl-${uid}" aria-label="${escapeHtml(i18n.t('lasso.export'))}"><span aria-hidden="true">⬇</span> .osm</button>` : '';
   return `<div class="popup-content">
           <div class="popup-title"><strong>${escapeHtml(street.primary)} ${escapeHtml(number)}</strong><br>
             <small>${escapeHtml(street.secondary)} ${street.secondary ? escapeHtml(number) : ''}</small></div>
@@ -49,35 +50,84 @@ export function popupHtml(props, lng, lat, uid, i18n = getI18n()) {
             ${osmButton}</div></div>`;
 }
 
+export function nearestFeature(features, project, center) {
+  let best = null;
+  for (const feature of features) {
+    const [lng, lat] = feature.geometry.coordinates;
+    const point = project([lng, lat]);
+    const distance = (point.x - center.x) ** 2 + (point.y - center.y) ** 2;
+    if (!best || distance < best.distance) best = { feature, lng, lat, distance };
+  }
+  return best;
+}
+
 export function initPopup(map, { isLassoActive, i18n = getI18n() }) {
-  map.on('click', ADDRESS_LAYER, e => {
-    if (isLassoActive()) return;
-    const props = e.features[0].properties;
-    const { lng, lat } = e.lngLat;
+  let current = null;
+
+  function wireButtons(popup, props, lng, lat, uid) {
+    if (!props.INSPIRE_ID) return;
+    const root = popup.getElement();
+    const numericId = extractInspireId(props.INSPIRE_ID);
+    const copyButton = root.querySelector(`#${uid}`);
+    if (copyButton) {
+      copyButton.addEventListener('click', ev => {
+        ev.stopPropagation();
+        navigator.clipboard.writeText(numericId).then(() => showToast(i18n.t('toast.copied'), i18n));
+      });
+    }
+    const downloadButton = root.querySelector(`#osm-dl-${uid}`);
+    if (downloadButton) {
+      downloadButton.addEventListener('click', ev => {
+        ev.stopPropagation();
+        downloadOsmXml([{ properties: props, lng, lat }], `address-${numericId}.osm`);
+      });
+    }
+  }
+
+  function open(props, lngLat) {
+    const { lng, lat } = lngLat;
     const uid = 'copy-' + Date.now();
-    new maplibregl.Popup()
-      .setLngLat(e.lngLat)
+    if (current) current.remove();
+    const popup = new maplibregl.Popup()
+      .setLngLat(lngLat)
       .setHTML(popupHtml(props, lng, lat, uid, i18n))
       .addTo(map);
-    if (!props.INSPIRE_ID) return;
-    const numericId = extractInspireId(props.INSPIRE_ID);
-    setTimeout(() => {
-      const copyButton = document.getElementById(uid);
-      if (copyButton) {
-        copyButton.addEventListener('click', ev => {
-          ev.stopPropagation();
-          navigator.clipboard.writeText(numericId).then(() => showToast(i18n.t('toast.copied'), i18n));
-        });
-      }
-      const downloadButton = document.getElementById('osm-dl-' + uid);
-      if (downloadButton) {
-        downloadButton.addEventListener('click', ev => {
-          ev.stopPropagation();
-          downloadOsmXml([{ properties: props, lng, lat }], `address-${numericId}.osm`);
-        });
-      }
-    }, 50);
+    current = popup;
+    popup.on('close', () => {
+      if (current === popup) current = null;
+      const active = document.activeElement;
+      if (!active || active === document.body) map.getCanvas().focus();
+    });
+    wireButtons(popup, props, lng, lat, uid);
+    return popup;
+  }
+
+  function openNearestToCenter() {
+    if (!map.getLayer(ADDRESS_LAYER)) return false;
+    const canvas = map.getCanvas();
+    const center = { x: canvas.clientWidth / 2, y: canvas.clientHeight / 2 };
+    const features = map.queryRenderedFeatures({ layers: [ADDRESS_LAYER] });
+    const best = nearestFeature(features, lngLat => map.project(lngLat), center);
+    if (!best) {
+      announce(i18n.t('map.noAddress'));
+      return false;
+    }
+    open(best.feature.properties, { lng: best.lng, lat: best.lat });
+    return true;
+  }
+
+  function close() {
+    if (!current) return false;
+    current.remove();
+    return true;
+  }
+
+  map.on('click', ADDRESS_LAYER, e => {
+    if (isLassoActive()) return;
+    open(e.features[0].properties, e.lngLat);
   });
   map.on('mouseenter', ADDRESS_LAYER, () => { if (!isLassoActive()) map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', ADDRESS_LAYER, () => { if (!isLassoActive()) map.getCanvas().style.cursor = ''; });
+
+  return { open, openNearestToCenter, close };
 }

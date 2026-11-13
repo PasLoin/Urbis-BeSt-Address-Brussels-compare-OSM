@@ -3,6 +3,7 @@ import { pointInPolygon } from './geometry.js';
 import { downloadOsmXml } from './osm-export.js';
 import { ADDRESS_LAYER } from './filters.js';
 import { getI18n } from './i18n.js';
+import { announce } from './announce.js';
 
 export const LASSO_SOURCE = 'lasso-source';
 const MIN_DIST = 10;
@@ -24,6 +25,7 @@ export function initLasso(map, i18n = getI18n()) {
   const panel = document.getElementById('lasso-panel');
   const countEl = document.getElementById('lasso-count');
   const labelEl = document.getElementById('lasso-label');
+  const exportButton = document.getElementById('lasso-export');
   const canvas = map.getCanvas();
 
   function updatePolygon() {
@@ -48,7 +50,9 @@ export function initLasso(map, i18n = getI18n()) {
     active = !active;
     drawing = false;
     button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
     if (active) {
+      announce(i18n.t('lasso.activeHelp'));
       points = [];
       selected = [];
       canvas.style.cursor = 'crosshair';
@@ -64,7 +68,7 @@ export function initLasso(map, i18n = getI18n()) {
     }
   }
 
-  function finish() {
+  function finish({ fromKeyboard = false } = {}) {
     if (points.length < 3) { points = []; updatePolygon(); return; }
     const polygon = points.map(p => [p.lng, p.lat]);
     const features = map.queryRenderedFeatures({ layers: [ADDRESS_LAYER] });
@@ -80,14 +84,31 @@ export function initLasso(map, i18n = getI18n()) {
         selected.push({ properties: f.properties, lng: coords[0], lat: coords[1], geometry: f.geometry });
       }
     }
+    const label = i18n.t('lasso.selected', { count: selected.length });
     countEl.textContent = selected.length;
-    labelEl.textContent = i18n.t('lasso.selected', { count: selected.length });
+    labelEl.textContent = label;
     panel.style.display = 'block';
+    announce(`${selected.length} ${label}`);
     active = false;
     drawing = false;
     button.classList.remove('active');
+    button.setAttribute('aria-pressed', 'false');
     canvas.style.cursor = '';
     map.dragPan.enable();
+    if (fromKeyboard) exportButton.focus();
+  }
+
+  function selectView() {
+    if (!active) return false;
+    const width = canvas.clientWidth;
+    const height = canvas.clientHeight;
+    points = [[0, 0], [width, 0], [width, height], [0, height]].map(px => {
+      const ll = map.unproject(px);
+      return { lng: ll.lng, lat: ll.lat };
+    });
+    updatePolygon();
+    finish({ fromKeyboard: true });
+    return true;
   }
 
   function start(x, y) {
@@ -115,10 +136,14 @@ export function initLasso(map, i18n = getI18n()) {
   }
 
   button.addEventListener('click', toggle);
-  document.getElementById('lasso-export').addEventListener('click', () => {
+  exportButton.addEventListener('click', () => {
     if (selected.length) downloadOsmXml(selected, 'addresses-selection.osm');
   });
-  document.getElementById('lasso-cancel').addEventListener('click', resetSelection);
+  document.getElementById('lasso-cancel').addEventListener('click', () => {
+    const hadFocus = panel.contains(document.activeElement);
+    resetSelection();
+    if (hadFocus) button.focus();
+  });
 
   canvas.addEventListener('mousedown', e => {
     if (!active || e.button !== 0) return;
@@ -153,15 +178,17 @@ export function initLasso(map, i18n = getI18n()) {
   });
 
   function handleEscape() {
+    drawing = false;
     if (active) {
-      drawing = false;
       toggle();
       return true;
     }
-    drawing = false;
+    if (panel.style.display !== 'block') return false;
+    const hadFocus = panel.contains(document.activeElement);
     resetSelection();
-    return false;
+    if (hadFocus) button.focus();
+    return true;
   }
 
-  return { isActive: () => active, handleEscape };
+  return { isActive: () => active, handleEscape, selectView };
 }

@@ -4,6 +4,7 @@ import { pickName } from './data-lang.js';
 import { getI18n } from './i18n.js';
 import { DATABRUSSELS_HOST, localizedDatabrusselsUrl } from './databrussels.js';
 import { siteUrl } from './paths.js';
+import { announce } from './announce.js';
 
 const URBIS_LANGS = ['fr', 'nl'];
 const URBIS_BASE = 'https://geoservices.irisnet.be/geocoding/api/v1/brussels/geocoding';
@@ -182,48 +183,63 @@ export function initSearch(map, { isLassoActive, i18n = getI18n() }) {
     if (marker) { marker.remove(); marker = null; }
   }
 
+  function setOpen(open) {
+    dropdown.classList.toggle('open', open);
+    input.setAttribute('aria-expanded', open && currentItems.length ? 'true' : 'false');
+  }
+
+  function setActive(index) {
+    activeItem = index;
+    const options = dropdown.querySelectorAll('li[role="option"]');
+    options.forEach((li, i) => {
+      li.classList.toggle('active', i === index);
+      li.setAttribute('aria-selected', i === index ? 'true' : 'false');
+    });
+    if (index >= 0 && options[index]) input.setAttribute('aria-activedescendant', options[index].id);
+    else input.removeAttribute('aria-activedescendant');
+  }
+
   function showStatus(msg, isError = false) {
     currentItems = [];
+    dropdown.removeAttribute('role');
+    input.removeAttribute('aria-activedescendant');
     dropdown.innerHTML = `<li class="${isError ? 'error-row' : 'status-row'}">${escapeHtml(msg)}</li>`;
-    dropdown.classList.add('open');
+    setOpen(true);
+    announce(msg);
   }
 
   function hide() {
-    dropdown.classList.remove('open');
-    activeItem = -1;
+    setOpen(false);
+    setActive(-1);
   }
 
   function render(items, query) {
     currentItems = items;
-    activeItem = -1;
     dropdown.innerHTML = '';
+    dropdown.setAttribute('role', 'listbox');
     items.forEach((r, i) => {
       const li = document.createElement('li');
+      li.id = `search-option-${i}`;
       li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', 'false');
       const badge = r.source === 'osm'
         ? '<span class="sr-badge osm">OSM</span>'
         : '<span class="sr-badge">UrbIS</span>';
-      const refLink = r.refUrl
-        ? `<div class="sr-ref"><a href="${escapeHtml(r.refUrl)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">databrussels.be ↗</a></div>`
-        : '';
       li.innerHTML = `<div class="sr-label">${highlight(r.label, query)}${badge}</div>`
-        + (r.sub ? `<div class="sr-sub">${escapeHtml(r.sub)}</div>` : '')
-        + refLink;
+        + (r.sub ? `<div class="sr-sub">${escapeHtml(r.sub)}</div>` : '');
       li.addEventListener('click', () => select(r));
-      li.addEventListener('mouseenter', () => {
-        activeItem = i;
-        dropdown.querySelectorAll('li').forEach((el, j) => el.classList.toggle('active', j === i));
-      });
+      li.addEventListener('mouseenter', () => setActive(i));
       dropdown.appendChild(li);
     });
-    dropdown.classList.add('open');
+    setActive(-1);
+    setOpen(true);
+    announce(i18n.t('search.resultCount', { count: items.length }));
   }
 
   function moveActive(dir) {
-    const lis = dropdown.querySelectorAll('li:not(.status-row):not(.error-row)');
+    const lis = dropdown.querySelectorAll('li[role="option"]');
     if (!lis.length) return;
-    activeItem = Math.max(0, Math.min(lis.length - 1, activeItem + dir));
-    lis.forEach((li, i) => li.classList.toggle('active', i === activeItem));
+    setActive(Math.max(0, Math.min(lis.length - 1, activeItem + dir)));
     lis[activeItem]?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -234,13 +250,13 @@ export function initSearch(map, { isLassoActive, i18n = getI18n() }) {
     const [lon, lat] = result.lngLat;
     removeMarker();
     const refLink = result.refUrl
-      ? `<br><a href="${escapeHtml(result.refUrl)}" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#4a90d9">databrussels.be ↗</a>`
+      ? `<br><a class="search-popup-ref" href="${escapeHtml(result.refUrl)}" target="_blank" rel="noopener noreferrer">databrussels.be <span aria-hidden="true">↗</span></a>`
       : '';
     marker = new maplibregl.Marker({ color: '#e74c3c' })
       .setLngLat([lon, lat])
       .setPopup(new maplibregl.Popup({ offset: 28, maxWidth: '240px' })
         .setHTML(`<strong>${escapeHtml(result.label)}</strong>`
-          + (result.sub ? `<br><span style="font-size:11px;color:#666">${escapeHtml(result.sub)}</span>` : '')
+          + (result.sub ? `<br><span class="search-popup-sub">${escapeHtml(result.sub)}</span>` : '')
           + refLink))
       .addTo(map)
       .togglePopup();
@@ -266,8 +282,13 @@ export function initSearch(map, { isLassoActive, i18n = getI18n() }) {
     }
   }
 
+  function setExpanded(expanded) {
+    bar.classList.toggle('expanded', expanded);
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  }
+
   function collapse() {
-    bar.classList.remove('expanded');
+    setExpanded(false);
     input.value = '';
     clear.classList.remove('visible');
     hide();
@@ -275,21 +296,17 @@ export function initSearch(map, { isLassoActive, i18n = getI18n() }) {
   }
 
   toggle.addEventListener('click', () => {
-    const expanded = bar.classList.toggle('expanded');
-    if (expanded) {
-      input.focus();
+    if (bar.classList.contains('expanded')) {
+      collapse();
     } else {
-      input.value = '';
-      clear.classList.remove('visible');
-      hide();
-      removeMarker();
+      setExpanded(true);
+      input.focus();
     }
   });
 
   input.addEventListener('input', () => {
     const q = input.value.trim();
     clear.classList.toggle('visible', q.length > 0);
-    activeItem = -1;
     hide();
     if (source === 'osm') {
       if (q.length < 3) return;
@@ -330,7 +347,10 @@ export function initSearch(map, { isLassoActive, i18n = getI18n() }) {
   document.querySelectorAll('.src-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       source = btn.dataset.src;
-      document.querySelectorAll('.src-btn').forEach(b => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('.src-btn').forEach(b => {
+        b.classList.toggle('active', b === btn);
+        b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+      });
       hide();
       const q = input.value.trim();
       if (source === 'osm' && q.length >= 3) {
@@ -344,13 +364,20 @@ export function initSearch(map, { isLassoActive, i18n = getI18n() }) {
 
   map.on('click', () => { if (!isLassoActive()) hide(); });
   toggle.addEventListener('mouseenter', () => loadIndex().catch(() => {}), { once: true });
+  toggle.addEventListener('focus', () => loadIndex().catch(() => {}), { once: true });
 
   function handleEscape() {
     if (dropdown.classList.contains('open')) {
       hide();
-    } else if (bar.classList.contains('expanded')) {
-      collapse();
+      return true;
     }
+    if (bar.classList.contains('expanded')) {
+      const hadFocus = bar.contains(document.activeElement);
+      collapse();
+      if (hadFocus) toggle.focus();
+      return true;
+    }
+    return false;
   }
 
   return { handleEscape };

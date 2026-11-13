@@ -60,10 +60,10 @@ python3 check-i18n.py
 npm test
 python3 -m pytest tests/test_site.py tests/test_data.py
 python3 -m playwright install chromium
-python3 -m pytest tests/test_e2e.py
+python3 -m pytest tests/test_e2e.py tests/test_accessibility.py
 ```
 
-`npm test` needs Node.js 22 or later. The `site.yml` workflow runs all of these on every pull request and before each deployment.
+`npm test` needs Node.js 22 or later. [ACCESSIBILITY.md](ACCESSIBILITY.md) explains what the accessibility tests block and how to use the map with a keyboard. The `site.yml` workflow runs all of these on every pull request and before each deployment.
 
 ## Translations
 
