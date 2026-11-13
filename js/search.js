@@ -165,6 +165,7 @@ export function initSearch(map, { isLassoActive, i18n = getI18n() }) {
   const input = document.getElementById('search-input');
   const clear = document.getElementById('search-clear');
   const dropdown = document.getElementById('search-dropdown');
+  const control = document.getElementById('search-control');
 
   function loadIndex() {
     return new Promise((ok, fail) => {
@@ -363,6 +364,9 @@ export function initSearch(map, { isLassoActive, i18n = getI18n() }) {
   });
 
   map.on('click', () => { if (!isLassoActive()) hide(); });
+  control.addEventListener('focusout', e => {
+    if (e.relatedTarget && !control.contains(e.relatedTarget)) hide();
+  });
   toggle.addEventListener('mouseenter', () => loadIndex().catch(() => {}), { once: true });
   toggle.addEventListener('focus', () => loadIndex().catch(() => {}), { once: true });
 

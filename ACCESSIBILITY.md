@@ -10,11 +10,13 @@ When the map has focus, a ring marks the centre of the view. The arrow keys move
 
 The freehand lasso needs a mouse or a finger. With a keyboard, turn the lasso on with its button, go back to the map and press Enter: every exportable address in the visible area is selected and focus moves to the export button. Escape closes the selection panel, and focus goes back to the lasso button if it was in the panel.
 
-The search field follows the ARIA combobox pattern. The up and down arrows move through the results, Enter or Tab picks one, the first Escape closes the list and a second one folds the search and returns to the search button. When the search is folded, the field is out of the tab order.
+The search field follows the ARIA combobox pattern. The up and down arrows move through the results, Enter or Tab picks one, the first Escape closes the list and a second one folds the search and returns to the search button. The list also closes as soon as focus leaves the search area, so it never hides the buttons below it. When the search is folded, the field is out of the tab order.
 
 The basemap and language buttons open a small panel that you reach with Tab. Escape closes it and puts focus back on its button, and so does moving focus out of the panel.
 
 ## Screen readers
+
+The page has a visually hidden `h1` with its title and three landmarks: `main` for the map and its tools, a `nav` named after the language menu, and an `aside` for the filter panel. A screen reader user can jump straight to the filters without going through the map controls.
 
 The page has one polite status region, `#a11y-status`. It announces the number of search results and the search messages, the lasso mode and the number of selected addresses, the copied INSPIRE ID, and "no address shown in this area" when Enter finds nothing near the centre. The visual toast that says the ID was copied is hidden from screen readers so the message is read once.
 
@@ -55,15 +57,13 @@ python3 -m pytest tests/test_accessibility.py -v
 
 It uses axe-core through `axe-playwright-python` and audits the page in several states: on load in each language, and in French with search results open, with a search message, with each menu open, with an address popup, with the lasso panel and with the copy toast. Before each audit the test hides the map canvas and puts black behind the semi-transparent panels, which is the worst background they can get over a real basemap. axe cannot read colours from the map tiles.
 
-An axe violation fails the build when it belongs to one of the criteria this work fixed: 1.4.3, 1.4.11, 2.1.1, 2.1.2, 2.4.7, 4.1.2 or 4.1.3. Any other WCAG 2.1 A or AA violation, and any check axe could not finish for those criteria, appears as a pytest warning. The full results of each state go to `a11y-report/`, which the `Site` and `CI` workflows upload as the `a11y-report-<run id>` artifact. To make another criterion blocking, add its axe tag (for example `wcag131`) to `BLOCKING_TAGS`.
+An axe violation fails the build when it belongs to one of the criteria this work fixed: 1.4.3, 1.4.11, 2.1.1, 2.1.2, 2.4.1, 2.4.7, 4.1.2 or 4.1.3. axe never reports a missing bypass as a violation, only as a check to review, so the test treats that `bypass` result as a failure too. Any other WCAG 2.1 A or AA violation, and any check axe could not finish for those criteria, appears as a pytest warning. The full results of each state go to `a11y-report/`, which the `Site` and `CI` workflows upload as the `a11y-report-<run id>` artifact. To make another criterion blocking, add its axe tag (for example `wcag131`) to `BLOCKING_TAGS`.
 
 axe does not test keyboard use, so the same file checks it directly. The tests walk the whole tab order and fail if focus gets stuck or if an element has no visible focus. They also open an address popup with Enter, reach the JOSM link and close it with Escape. Other tests open and close each menu, use the search combobox, make a lasso selection from the keyboard and read what the status region announces. The placeholder contrast has its own test, because axe does not check placeholder text.
 
 ## Known gaps
 
 On the map itself, statuses differ only by colour (1.4.1), and the contrast of the points against the basemap is not checked (1.4.11). The filter list and the popup give each status in words.
-
-The page has no landmarks and no skip link (2.4.1). axe reports the missing bypass as a check it could not complete.
 
 Several targets are smaller than 24 by 24 px. That is a WCAG 2.2 criterion (2.5.8), outside the current target.
 

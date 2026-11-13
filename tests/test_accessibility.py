@@ -18,7 +18,8 @@ REPORT_DIR = Path(os.environ.get('A11Y_REPORT_DIR', 'a11y-report'))
 LANG_PATHS = {lang: conf['path'] for lang, conf in LANGS.items()}
 ADDRESS_VIEW = '#17/50.8466/4.3685'
 AUDIT_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
-BLOCKING_TAGS = {'wcag143', 'wcag1411', 'wcag211', 'wcag212', 'wcag247', 'wcag412', 'wcag413'}
+BLOCKING_TAGS = {'wcag143', 'wcag1411', 'wcag211', 'wcag212', 'wcag241', 'wcag247', 'wcag412', 'wcag413'}
+BLOCKING_INCOMPLETE = {'bypass'}
 MIN_TEXT_CONTRAST = 4.5
 WORST_CASE_BACKDROP = """
   .maplibregl-canvas { visibility: hidden !important; }
@@ -136,17 +137,20 @@ def run_axe(page, state):
     blocking, other = [], []
     for violation in result['violations']:
         (blocking if BLOCKING_TAGS & set(violation['tags']) else other).append(violation)
+    incomplete = []
+    for item in result.get('incomplete', []):
+        (blocking if item['id'] in BLOCKING_INCOMPLETE else incomplete).append(item)
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     (REPORT_DIR / f'{state}.json').write_text(json.dumps({
         'state': state,
         'blocking': blocking,
         'warnings': other,
-        'incomplete': result.get('incomplete', []),
+        'incomplete': incomplete,
     }, ensure_ascii=False, indent=2), encoding='utf-8')
     for violation in other:
         targets = ', '.join(str(node['target']) for node in violation['nodes'][:3])
         warnings.warn(f"[{state}] {violation['id']} ({violation['impact']}) : {violation['help']} → {targets}", A11yWarning)
-    for item in result.get('incomplete', []):
+    for item in incomplete:
         if BLOCKING_TAGS & set(item['tags']):
             targets = ', '.join(str(node['target']) for node in item['nodes'][:3])
             warnings.warn(f"[{state}] {item['id']} à vérifier à la main : {item['help']} → {targets}", A11yWarning)
@@ -358,3 +362,30 @@ def test_regions_de_statut_presentes(page, site_url):
     expect(status).to_have_attribute('aria-live', 'polite')
     expect(page.locator('#copy-toast')).to_have_attribute('aria-hidden', 'true')
     expect(page.locator('#stats-bar')).to_have_attribute('aria-hidden', 'true')
+
+
+@pytest.mark.parametrize('lang', LANG_PATHS)
+def test_titre_et_zones_de_la_page(page, site_url, lang):
+    strings = dictionary(lang)
+    open_site(page, site_url, lang)
+    expect(page.locator('h1')).to_have_count(1)
+    expect(page.locator('h1')).to_have_text(strings['meta.title'])
+    expect(page.get_by_role('main')).to_have_count(1)
+    expect(page.get_by_role('main').locator('.maplibregl-canvas')).to_have_count(1)
+    expect(page.get_by_role('navigation', name=strings['lang.title'])).to_contain_text('English')
+    expect(page.get_by_role('complementary', name=strings['panel.title']).locator('#filters')).to_have_count(1)
+
+
+def test_liste_de_recherche_fermee_quand_le_focus_sort(page, site_url):
+    open_site(page, site_url)
+    page.click('#search-toggle')
+    page.fill('#search-input', 'Rue de la Loi 16')
+    expect(page.locator('#search-dropdown li[role="option"]').first).to_be_visible(timeout=15000)
+    for _ in range(10):
+        page.keyboard.press('Tab')
+        if not page.evaluate("document.getElementById('search-control').contains(document.activeElement)"):
+            break
+    else:
+        pytest.fail('le focus ne sort pas de la zone de recherche')
+    expect(page.locator('#search-dropdown')).to_be_hidden()
+    expect(page.locator('#search-input')).to_have_attribute('aria-expanded', 'false')

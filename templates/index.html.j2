@@ -56,6 +56,8 @@
   <link rel="stylesheet" href="{{ root }}style.css"/>
 </head>
 <body>
+<main id="app">
+<h1 class="visually-hidden">{{ t('meta.title') }}</h1>
 <div id="map"></div>
 <p id="map-help" class="visually-hidden">{{ t('map.keyboardHelp') }}</p>
 <div id="a11y-status" class="visually-hidden" role="status" aria-live="polite"></div>
@@ -108,6 +110,7 @@
   </button>
   <div id="basemap-menu" role="group" aria-label="{{ t('basemap.title') }}"></div>
 </div>
+<nav id="lang-nav" aria-label="{{ t('lang.title') }}">
 <div id="lang-control">
   <button id="lang-toggle" type="button" title="{{ t('lang.title') }}" aria-label="{{ t('lang.title') }}" aria-expanded="false" aria-controls="lang-menu">{{ lang|upper }}</button>
   <div id="lang-menu">
@@ -116,12 +119,15 @@
 {%- endfor %}
   </div>
 </div>
+</nav>
 <div id="lang-banner" role="region" aria-live="polite" hidden>
   <span id="lang-banner-text"></span>
   <a id="lang-banner-switch" href="#"></a>
   <button id="lang-banner-close" type="button">&times;</button>
 </div>
 <div id="copy-toast" aria-hidden="true"></div>
+</main>
+<aside id="panel-region" aria-label="{{ t('panel.title') }}">
 <details id="panel" open>
   <summary>{{ t('panel.title') }} <span class="toggle-arrow" aria-hidden="true"></span></summary>
   <div id="filters"></div>
@@ -134,6 +140,7 @@
     <div>{{ t('versions.osm') }} <span id="osm-date">…</span></div>
   </div>
 </details>
+</aside>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
 <script type="module" src="{{ root }}js/app.js"></script>

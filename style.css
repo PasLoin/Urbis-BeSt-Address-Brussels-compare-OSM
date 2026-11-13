@@ -1,4 +1,4 @@
-html, body, #map { height: 100%; margin: 0; }
+html, body, #app, #map { height: 100%; margin: 0; }
 
 .visually-hidden {
   position: absolute !important;
