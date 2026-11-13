@@ -19,6 +19,18 @@ function customAttribution(i18n) {
   ];
 }
 
+function mapLocale(i18n) {
+  return {
+    'Map.Title': i18n.t('map.title'),
+    'Popup.Close': i18n.t('map.closePopup'),
+    'Marker.Title': i18n.t('search.marker'),
+    'NavigationControl.ZoomIn': i18n.t('map.zoomIn'),
+    'NavigationControl.ZoomOut': i18n.t('map.zoomOut'),
+    'NavigationControl.ResetBearing': i18n.t('map.resetBearing'),
+    'AttributionControl.ToggleAttribution': i18n.t('map.toggleAttribution')
+  };
+}
+
 function loadVersion(i18n) {
   fetch(siteUrl('version.json'))
     .then(r => r.json())
@@ -43,8 +55,11 @@ function start(i18n) {
     center: [4.352, 50.846],
     zoom: 10,
     maxZoom: 19,
-    hash: true
+    hash: true,
+    locale: mapLocale(i18n)
   });
+  const canvas = map.getCanvas();
+  canvas.setAttribute('aria-describedby', 'map-help');
 
   let attributionControl = null;
 
@@ -77,17 +92,24 @@ function start(i18n) {
     addLassoLayers(map);
   });
 
-  initBasemaps(map, i18n);
+  const basemaps = initBasemaps(map, i18n);
   const lasso = initLasso(map, i18n);
-  initPopup(map, { isLassoActive: lasso.isActive, i18n });
+  const popup = initPopup(map, { isLassoActive: lasso.isActive, i18n });
   const search = initSearch(map, { isLassoActive: lasso.isActive, i18n });
-  initLanguageControl(i18n);
+  const language = initLanguageControl(i18n);
   initLanguageBanner(i18n);
 
+  canvas.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    if (lasso.isActive()) lasso.selectView();
+    else popup.openNearestToCenter();
+  });
+
+  const escapeHandlers = [popup.close, language.handleEscape, basemaps.handleEscape, lasso.handleEscape, search.handleEscape];
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
-    if (lasso.handleEscape()) return;
-    search.handleEscape();
+    escapeHandlers.some(handle => handle());
   });
 }
 

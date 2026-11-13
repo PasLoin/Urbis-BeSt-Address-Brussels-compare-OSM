@@ -130,13 +130,9 @@ export function initBasemaps(map, i18n = getI18n()) {
     menu.replaceChildren(...BASEMAPS.map(bm => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'basemap-option' + (bm.id === currentBasemap ? ' active' : '');
+      btn.className = 'basemap-option';
       btn.dataset.id = bm.id;
-      btn.setAttribute('role', 'radio');
-      btn.setAttribute('aria-checked', bm.id === currentBasemap ? 'true' : 'false');
-      const label = basemapLabel(bm, i18n);
-      btn.title = label;
-      btn.setAttribute('aria-label', label);
+      btn.title = basemapLabel(bm, i18n);
       const img = document.createElement('img');
       img.src = bm.thumb;
       img.alt = '';
@@ -148,6 +144,17 @@ export function initBasemaps(map, i18n = getI18n()) {
       btn.addEventListener('click', () => setBasemap(bm.id));
       return btn;
     }));
+    syncMenu();
+  }
+
+  function syncMenu() {
+    menu.querySelectorAll('.basemap-option').forEach(btn => {
+      const isCurrent = btn.dataset.id === currentBasemap;
+      btn.classList.toggle('active', isCurrent);
+      btn.classList.remove('loading');
+      btn.removeAttribute('aria-busy');
+      btn.setAttribute('aria-pressed', isCurrent ? 'true' : 'false');
+    });
   }
 
   async function setBasemap(id) {
@@ -155,7 +162,10 @@ export function initBasemaps(map, i18n = getI18n()) {
     if (!bm || id === currentBasemap) return;
     const current = ++request;
     const btn = document.querySelector(`.basemap-option[data-id="${id}"]`);
-    if (btn) btn.classList.add('loading');
+    if (btn) {
+      btn.classList.add('loading');
+      btn.setAttribute('aria-busy', 'true');
+    }
     try {
       const style = await loadStyle(bm);
       if (current !== request) return;
@@ -163,11 +173,11 @@ export function initBasemaps(map, i18n = getI18n()) {
       if (bm.url) map.once('style.load', () => loadPatterns(style, bm.url));
       map.setStyle(style, { diff: false, transformStyle: keepOverlays });
       try { localStorage.setItem(BASEMAP_STORAGE_KEY, id); } catch (e) {}
-      renderMenu();
+      syncMenu();
     } catch (err) {
       console.error('Fond de carte indisponible :', err);
       showToast(i18n.t('basemap.unavailable'), i18n);
-      if (btn) btn.classList.remove('loading');
+      syncMenu();
     }
   }
 
@@ -183,9 +193,17 @@ export function initBasemaps(map, i18n = getI18n()) {
   document.addEventListener('click', e => {
     if (!control.contains(e.target)) setMenuOpen(false);
   });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') setMenuOpen(false);
+  control.addEventListener('focusout', e => {
+    if (e.relatedTarget && !control.contains(e.relatedTarget)) setMenuOpen(false);
   });
+
+  function handleEscape() {
+    if (!control.classList.contains('open')) return false;
+    const hadFocus = control.contains(document.activeElement);
+    setMenuOpen(false);
+    if (hadFocus) toggle.focus();
+    return true;
+  }
 
   renderMenu();
   map.once('load', () => {
@@ -194,5 +212,5 @@ export function initBasemaps(map, i18n = getI18n()) {
     if (saved && saved !== currentBasemap) setBasemap(saved);
   });
 
-  return { renderMenu, setBasemap };
+  return { renderMenu, setBasemap, handleEscape };
 }

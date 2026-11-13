@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-13
+
+### Accessibilité
+
+- **WCAG 2.1 AA, première étape** - Contrastes des petits textes et des boutons corrigés, focus visible partout, adresses ouvrables au clavier (Entrée sur la carte), sélection lasso au clavier, recherche en combobox ARIA (la liste se ferme quand le focus en sort), annonces pour les lecteurs d'écran, titre `h1` masqué et zones `main`, `nav` et `aside`. Détails et limites connues dans [ACCESSIBILITY.md](ACCESSIBILITY.md).
+- **Tests** - `tests/test_accessibility.py` (Playwright + axe-core) bloque les régressions sur ces critères et signale le reste en avertissement.
+
 ## 2026-11-07
 
 ### Ajouté

@@ -66,8 +66,8 @@ export function initLanguageControl(i18n = getI18n()) {
   document.addEventListener('click', e => {
     if (!control.contains(e.target)) setMenuOpen(false);
   });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') setMenuOpen(false);
+  control.addEventListener('focusout', e => {
+    if (e.relatedTarget && !control.contains(e.relatedTarget)) setMenuOpen(false);
   });
   document.querySelectorAll('#lang-menu [data-lang]').forEach(link => {
     link.addEventListener('click', e => {
@@ -75,8 +75,19 @@ export function initLanguageControl(i18n = getI18n()) {
       saveChoice(link.dataset.lang);
       setMenuOpen(false);
       if (link.dataset.lang !== i18n.lang) goTo(link.href);
+      else toggle.focus();
     });
   });
+
+  function handleEscape() {
+    if (!control.classList.contains('open')) return false;
+    const hadFocus = control.contains(document.activeElement);
+    setMenuOpen(false);
+    if (hadFocus) toggle.focus();
+    return true;
+  }
+
+  return { handleEscape };
 }
 
 export function initLanguageBanner(i18n = getI18n()) {

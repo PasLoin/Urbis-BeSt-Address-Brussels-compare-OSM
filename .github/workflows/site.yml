@@ -54,7 +54,16 @@ jobs:
         run: python -m playwright install --with-deps chromium
 
       - name: End-to-end tests
-        run: python -m pytest tests/test_e2e.py -v
+        run: python -m pytest tests/test_e2e.py tests/test_accessibility.py -v
+
+      - name: Upload accessibility report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: a11y-report-${{ github.run_id }}
+          path: a11y-report/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload screenshots
         if: always()
