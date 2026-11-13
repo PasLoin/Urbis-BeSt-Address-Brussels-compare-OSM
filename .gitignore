@@ -9,3 +9,4 @@ __pycache__/
 addresses.pmtiles
 search-index.json
 version.json
+a11y-report/
