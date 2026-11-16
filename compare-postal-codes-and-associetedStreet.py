@@ -79,8 +79,8 @@ from pyproj import Transformer
 
 OSM_PBF_FILE = 'brussels_capital_region-latest.osm.pbf'
 OSM_PBF_URL = (
-    'https://raw.githubusercontent.com/PasLoin/'
-    'Osm-python-analyse_Belgium/main/pbf_analyse/history/Brussels-daily.pbf'
+    'https://github.com/PasLoin/Osm-python-analyse_Belgium/'
+    'releases/download/daily/Brussels-daily.pbf'
 )
 HEADERS = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
 
