@@ -1,0 +1,29 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+      timezone: Europe/Brussels
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "security(pip)"
+    groups:
+      pip-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      timezone: Europe/Brussels
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: "security(actions)"
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
