@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-18
+
+### Ajouté
+
+- **Export des adresses absentes d'UrbIS** - Les adresses présentes dans OSM mais absentes d'UrbIS sont publiées chaque jour dans la release `data-latest` en CSV (`osm-absent-urbis.csv`) et en GeoPackage (`osm-absent-urbis.gpkg`, EPSG:31370), avec le statut, la note OSM, l'identifiant de l'objet OSM et le lien vers osm.org (#33).
+
+### Corrigé
+
+- **Adresses absentes d'UrbIS comptées deux fois dans les statistiques**
+
 ## 2026-11-13
 
 ### Accessibilité
