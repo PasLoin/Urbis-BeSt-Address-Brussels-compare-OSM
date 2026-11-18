@@ -11,13 +11,14 @@ from collections import defaultdict
 import pandas as pd
 import geopandas as gpd
 import osmium
-from shapely.geometry import Point, shape
+from shapely.geometry import Point, Polygon
+from shapely.ops import unary_union
 from shapely.prepared import prep
 import urllib.request
 
 PBF_FILE = 'brussels_capital_region-latest.osm.pbf'
 BOUNDARY_RELATION = 54094
-BOUNDARY_URL = f'https://polygons.openstreetmap.fr/get_geojson.py?id={BOUNDARY_RELATION}&params=0'
+BOUNDARY_URL = f'https://raw.githubusercontent.com/PasLoin/Osm-python-analyse_Belgium/main/pbf_analyse/{BOUNDARY_RELATION}.poly'
 HEADERS = {'User-Agent': 'Mozilla/5.0 (compatible; UrbIS-Sync/1.0)'}
 MAX_MATCH_DIST_M = 500
 
@@ -45,9 +46,8 @@ class AddressHandler(osmium.SimpleHandler):
         self.addresses = set()
         self.verified_absent = set()
         self.street_name_groups = []
-        # For reverse lookup: store details of OSM addresses with coordinates
-        self.address_details = {}  # (norm_street, norm_nbr) -> {'street': raw, 'nbr': raw, 'lat': float, 'lon': float}
         self.address_coords = defaultdict(list)
+        self.osm_objects = []
 
     def _collect_street_variants(self, tags):
         variants = set()
@@ -75,7 +75,7 @@ class AddressHandler(osmium.SimpleHandler):
                     for nbr in nbrs:
                         self.verified_absent.add((part, nbr.strip()))
 
-    def _process(self, tags, lat=None, lon=None):
+    def _process(self, tags, lat=None, lon=None, osm_ref=None):
         housenumber = tags.get('addr:housenumber')
         street_tags = [
             tags.get('addr:street'),
@@ -92,18 +92,21 @@ class AddressHandler(osmium.SimpleHandler):
                     for nbr_raw in nbrs_raw:
                         nbr_n = normalize(nbr_raw)
                         self.addresses.add((part, nbr_n))
-                        # Store details for reverse lookup (keep first occurrence)
                         if lat is not None and lon is not None:
-                            key = (part, nbr_n)
-                            self.address_coords[key].append((lat, lon))
-                            if key not in self.address_details:
-                                self.address_details[key] = {
-                                    'street': raw_street,
-                                    'nbr': nbr_raw,
-                                    'lat': lat,
-                                    'lon': lon,
-                                    'note': tags.get('note', ''),
-                                }
+                            self.address_coords[(part, nbr_n)].append((lat, lon))
+
+            streets = [s for s in street_tags if s]
+            if streets and osm_ref and lat is not None and lon is not None:
+                for nbr_raw in nbrs_raw:
+                    if nbr_raw:
+                        self.osm_objects.append({
+                            'osm': osm_ref,
+                            'streets': streets,
+                            'nbr': nbr_raw,
+                            'note': tags.get('note', ''),
+                            'lat': lat,
+                            'lon': lon,
+                        })
 
         # Handle both not:addr:* and was:addr:* as verified absent
         for prefix in ('not', 'was'):
@@ -113,7 +116,7 @@ class AddressHandler(osmium.SimpleHandler):
         lat, lon = None, None
         if n.location.valid():
             lat, lon = n.location.lat, n.location.lon
-        self._process(n.tags, lat, lon)
+        self._process(n.tags, lat, lon, f'node/{n.id}')
 
     def way(self, w):
         lat, lon = None, None
@@ -130,7 +133,7 @@ class AddressHandler(osmium.SimpleHandler):
                     lon = sum(lons) / len(lons)
             except Exception:
                 pass
-        self._process(w.tags, lat, lon)
+        self._process(w.tags, lat, lon, f'way/{w.id}')
         if w.tags.get('highway'):
             self._collect_street_variants(w.tags)
 
@@ -140,14 +143,36 @@ class AddressHandler(osmium.SimpleHandler):
         if r.tags.get('type') == 'associatedStreet':
             self._collect_street_variants(r.tags)
 
+def parse_poly(text):
+    """Parse an Osmosis .poly file into a (Multi)Polygon."""
+    outers, holes = [], []
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    i = 1
+    while i < len(lines) and lines[i] != 'END':
+        is_hole = lines[i].startswith('!')
+        i += 1
+        ring = []
+        while i < len(lines) and lines[i] != 'END':
+            x, y = lines[i].split()[:2]
+            ring.append((float(x), float(y)))
+            i += 1
+        i += 1
+        if len(ring) >= 3:
+            (holes if is_hole else outers).append(Polygon(ring).buffer(0))
+    if not outers:
+        raise ValueError('aucun anneau extérieur dans le fichier .poly')
+    geom = unary_union(outers)
+    if holes:
+        geom = geom.difference(unary_union(holes))
+    return geom
+
 def load_boundary():
     """Download the Brussels-Capital Region boundary polygon (relation/54094)."""
-    print(f'[BOUNDARY] Téléchargement de la frontière (relation/{BOUNDARY_RELATION})...')
+    print(f'[BOUNDARY] Téléchargement de la frontière (relation/{BOUNDARY_RELATION}) : {BOUNDARY_URL}')
     try:
         req = urllib.request.Request(BOUNDARY_URL, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=30) as r:
-            data = json.loads(r.read())
-        geom = shape(data)
+            geom = parse_poly(r.read().decode('utf-8'))
         prepared = prep(geom)
         print(f'[BOUNDARY] Polygone chargé ({geom.geom_type}, {geom.area:.6f}°²)')
         return prepared
@@ -163,7 +188,8 @@ def load_osm(pbf_path):
     for group in handler.street_name_groups:
         for name in group:
             alias_map.setdefault(name, set()).update(group - {name})
-    return handler.addresses, handler.verified_absent, alias_map, handler.address_details, handler.address_coords
+    return (handler.addresses, handler.verified_absent, alias_map,
+            handler.osm_objects, handler.address_coords)
 
 def _dist_m(lat1, lon1, lat2, lon2):
     x = (lon2 - lon1) * 111320 * math.cos(math.radians((lat1 + lat2) / 2))
@@ -192,9 +218,8 @@ def get_status(streetfr, streetnl, nbr, osm_addrs, verified_absent, alias_map,
     if any((s, nbr_n) in verified_absent for s in expanded): return 'verified_absent'
     return 'missing'
 
-def find_osm_only(gdf, osm_addrs, osm_details, alias_map, boundary=None):
+def find_osm_only(gdf, osm_objects, alias_map, boundary=None):
     """Find OSM addresses that have no match in the UrbIS dataset."""
-    # Build expanded UrbIS address set
     urbis_set = set()
     for _, row in gdf.iterrows():
         nbr = normalize(str(row['POLICENUM'])) if row['POLICENUM'] else ''
@@ -210,34 +235,78 @@ def find_osm_only(gdf, osm_addrs, osm_details, alias_map, boundary=None):
         for s in streets:
             urbis_set.add((s, nbr))
 
-    # Find OSM addresses not in UrbIS
     osm_only = []
+    seen = set()
     skipped_boundary = 0
-    for (norm_street, norm_nbr), detail in osm_details.items():
-        # Filter by Brussels boundary
-        if boundary is not None:
-            if not boundary.contains(Point(detail['lon'], detail['lat'])):
-                skipped_boundary += 1
-                continue
-        # Expand with aliases
-        candidates = {norm_street}
-        candidates.update(alias_map.get(norm_street, set()))
-        if any((s, norm_nbr) in urbis_set for s in candidates):
+    for obj in osm_objects:
+        key = (obj['osm'], normalize(obj['nbr']))
+        if key in seen:
             continue
-        osm_only.append(detail)
+        seen.add(key)
+        if boundary is not None and not boundary.contains(Point(obj['lon'], obj['lat'])):
+            skipped_boundary += 1
+            continue
+        nbr_n = key[1]
+        candidates = set()
+        for raw_street in obj['streets']:
+            for part in split_bilingual(raw_street):
+                candidates.add(part)
+                candidates.update(alias_map.get(part, set()))
+        if any((s, nbr_n) in urbis_set for s in candidates):
+            continue
+        osm_only.append({**obj, 'street': obj['streets'][0]})
 
     if boundary is not None:
         print(f'[REVERSE] {skipped_boundary} adresses OSM hors Région exclues')
     print(f'[REVERSE] {len(osm_only)} adresses OSM absentes d\'UrbIS')
     return osm_only
 
+def osm_only_status(note):
+    return 'missing_in_urbis_verified' if 'urbis' in (note or '').lower() else 'missing_in_urbis'
+
+def export_osm_only(osm_only, out_dir):
+    columns = ['rue_osm', 'rue_fr', 'rue_nl', 'numero', 'statut', 'note_osm', 'objet_osm', 'lien_osm', 'lon', 'lat']
+    rows = []
+    for d in osm_only:
+        parts = re.split(r' [-\u2013\u2014] ', d['street'], maxsplit=1)
+        fr, nl = (parts + [''])[:2]
+        rows.append({
+            'rue_osm': d['street'],
+            'rue_fr': fr.strip(),
+            'rue_nl': nl.strip(),
+            'numero': d['nbr'],
+            'statut': osm_only_status(d.get('note')),
+            'note_osm': d.get('note', '') or '',
+            'objet_osm': d['osm'],
+            'lien_osm': f"https://www.openstreetmap.org/{d['osm']}",
+            'lon': round(d['lon'], 7),
+            'lat': round(d['lat'], 7),
+        })
+    out = gpd.GeoDataFrame(
+        pd.DataFrame(rows, columns=columns),
+        geometry=gpd.points_from_xy([r['lon'] for r in rows], [r['lat'] for r in rows]),
+        crs='EPSG:4326',
+    ).to_crs('EPSG:31370')
+    out = out.sort_values(
+        ['rue_osm', 'numero', 'objet_osm'],
+        key=lambda col: col.astype(str).str.lower(),
+    ).reset_index(drop=True)
+    csv_path = os.path.join(out_dir, 'osm-absent-urbis.csv')
+    gpkg_path = os.path.join(out_dir, 'osm-absent-urbis.gpkg')
+    out.drop(columns='geometry').to_csv(csv_path, index=False, encoding='utf-8-sig')
+    if os.path.exists(gpkg_path):
+        os.remove(gpkg_path)
+    out.to_file(gpkg_path, layer='osm_absent_urbis', driver='GPKG')
+    print(f'[EXPORT] {len(out)} adresses OSM absentes d\'UrbIS -> {csv_path}, {gpkg_path}')
+    return csv_path, gpkg_path
+
 def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
-    osm_addrs, verified_absent, alias_map, osm_details, osm_coords = set(), set(), {}, {}, {}
+    osm_addrs, verified_absent, alias_map, osm_objects, osm_coords = set(), set(), {}, [], {}
     osm_loaded = False
     if pbf_path and os.path.isfile(pbf_path):
-        osm_addrs, verified_absent, alias_map, osm_details, osm_coords = load_osm(pbf_path)
+        osm_addrs, verified_absent, alias_map, osm_objects, osm_coords = load_osm(pbf_path)
         osm_loaded = True
-        print(f'[OSM] {len(osm_addrs)} adresses, {len(verified_absent)} vérifiées absentes, {len(osm_details)} avec coordonnées')
+        print(f'[OSM] {len(osm_addrs)} adresses, {len(verified_absent)} vérifiées absentes, {len(osm_objects)} objets avec coordonnées')
     else:
         print(f'[WARN] Fichier PBF introuvable ({pbf_path}), pas de croisement OSM')
 
@@ -266,16 +335,13 @@ def gpkg_to_pmtiles(gpkg_path, pmtiles_path, pbf_path=None):
         if boundary is None:
             print('[WARN] Reverse matching ignoré : frontière indisponible')
         else:
-            osm_only = find_osm_only(gdf, osm_addrs, osm_details, alias_map, boundary)
+            osm_only = find_osm_only(gdf, osm_objects, alias_map, boundary)
             osm_only_count = len(osm_only)
+            export_osm_only(osm_only, os.path.dirname(pmtiles_path) or '.')
             if osm_only:
                 rows = []
                 for d in osm_only:
-                    note = d.get('note', '') or ''
-                    if 'urbis' in note.lower():
-                        status = 'missing_in_urbis_verified'
-                    else:
-                        status = 'missing_in_urbis'
+                    status = osm_only_status(d.get('note'))
                     rows.append({
                         'STRNAMEFRE': d['street'],
                         'STRNAMEDUT': None,
