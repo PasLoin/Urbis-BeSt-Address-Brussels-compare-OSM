@@ -32,6 +32,15 @@ The same street often has different names in the two sources. To handle this, th
 
 An address is `verified_absent` when OSM carries `not:addr:street` / `not:addr:housenumber`, or `was:addr:street` / `was:addr:housenumber` (usually on demolished buildings). An OSM-only address counts as verified when the `note` tag of the OSM object contains the word "urbis" (any case). OSM-only addresses outside the Brussels-Capital Region boundary (relation `54094`) are left out.
 
+## Downloading the OSM-only addresses
+
+The addresses that are in OSM but not in UrbIS (`missing_in_urbis` and `missing_in_urbis_verified`) are also published as a table, refreshed every day with the map:
+
+- CSV (UTF-8): https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM/releases/download/data-latest/osm-absent-urbis.csv
+- GeoPackage (EPSG:31370, layer `osm_absent_urbis`): https://github.com/PasLoin/Urbis-BeSt-Address-Brussels-compare-OSM/releases/download/data-latest/osm-absent-urbis.gpkg
+
+There is one row per OSM object and house number. `statut` keeps the two map statuses apart: `missing_in_urbis` (not in UrbIS, to check) and `missing_in_urbis_verified` (not in UrbIS, verified). `objet_osm` and `lien_osm` point to the OSM object. These files contain only OpenStreetMap data, UrbIS being used only to choose which addresses are listed, so they fall under the ODbL.
+
 ## Data updates
 
 A GitHub Actions workflow runs every day. It downloads the latest UrbIS release and the OSM extract for Brussels, rebuilds the vector tiles and the search index, and publishes them in the `data-latest` release once they pass validation. The filter panel shows the date of each source.
@@ -75,6 +84,6 @@ To add a text, add its key to every file in `i18n/`, then use `{{ t('my.key') }}
 
 The code in this repository is under the MIT license, see [LICENSE](LICENSE).
 
-The data has its own licenses. OpenStreetMap data is © OpenStreetMap contributors and available under the [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/). UrbIS data from the Brussels-Capital Region is released under [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
+The data has its own licenses, also stated in the notes of the `data-latest` release ([.github/data-release-notes.md](.github/data-release-notes.md)). OpenStreetMap data is © OpenStreetMap contributors and available under the [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/). UrbIS data from the Brussels-Capital Region is released under [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
 
-The generated files published in the `data-latest` release are derived from OpenStreetMap and therefore fall under the ODbL, not the MIT license. `search-index.json` is built from the OSM extract. `addresses.pmtiles` combines UrbIS addresses with a status computed from OSM data.
+The generated files published in the `data-latest` release are derived from OpenStreetMap and therefore fall under the ODbL, not the MIT license. `search-index.json` and `osm-absent-urbis.csv` / `.gpkg` are built from the OSM extract. `addresses.pmtiles` combines UrbIS addresses with a status computed from OSM data.
