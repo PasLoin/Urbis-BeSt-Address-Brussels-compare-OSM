@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 from datetime import date, datetime
@@ -71,3 +72,24 @@ def test_index_de_recherche(search_index):
         assert isinstance(number, str) and number
         assert 50.6 < lat < 51.0
         assert 4.1 < lon < 4.6
+
+
+EXPORT_COLUMNS = ['rue_osm', 'rue_fr', 'rue_nl', 'numero', 'statut', 'note_osm', 'objet_osm', 'lien_osm', 'lon', 'lat']
+
+
+def test_export_osm_absent_urbis(data_dir, version):
+    path = data_dir / 'osm-absent-urbis.csv'
+    if not path.is_file():
+        pytest.skip('osm-absent-urbis.csv absent : produit par generate-tiles.py')
+    with open(path, encoding='utf-8-sig', newline='') as f:
+        rows = list(csv.DictReader(f))
+    assert list(rows[0].keys()) == EXPORT_COLUMNS
+    s = version['stats']
+    assert len(rows) == s['missing_in_urbis'] + s['missing_in_urbis_verified']
+    keys = [(r['objet_osm'], r['numero']) for r in rows]
+    assert len(keys) == len(set(keys))
+    for r in rows:
+        assert r['statut'] in ('missing_in_urbis', 'missing_in_urbis_verified')
+        assert r['objet_osm'].split('/')[0] in ('node', 'way')
+        assert 50.6 < float(r['lat']) < 51.0
+        assert 4.1 < float(r['lon']) < 4.6
