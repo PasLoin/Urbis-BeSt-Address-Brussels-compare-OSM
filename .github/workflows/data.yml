@@ -51,11 +51,12 @@ jobs:
           if ! gh release view data-latest >/dev/null 2>&1; then
             gh release create data-latest \
               --title "Données UrbIS / OSM (dernière version valide)" \
-              --notes "Publiée automatiquement par data.yml après validation." \
+              --notes-file .github/data-release-notes.md \
               --prerelease \
               --latest=false
           fi
-          gh release upload data-latest addresses.pmtiles search-index.json version.json --clobber
+          gh release edit data-latest --notes-file .github/data-release-notes.md
+          gh release upload data-latest addresses.pmtiles search-index.json version.json osm-absent-urbis.csv osm-absent-urbis.gpkg --clobber
 
       - name: Keep rejected data for inspection
         if: failure()
@@ -65,5 +66,6 @@ jobs:
           path: |
             version.json
             search-index.json
+            osm-absent-urbis.csv
           if-no-files-found: ignore
           retention-days: 7
