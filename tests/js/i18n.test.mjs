@@ -4,7 +4,7 @@ import { createI18n, setI18n, getI18n, i18nFromDocument } from '../../js/i18n.js
 import { suggestedLang, redirectTarget, primaryBrowserLang } from '../../js/lang.js';
 import { generateOsmXml } from '../../js/osm-export.js';
 import { dataLang, localStreet } from '../../js/data-lang.js';
-import { buildUrbisUrl, urbisLanguages, searchAcrossLanguages, streetNameUrl } from '../../js/search.js';
+import { buildUrbisUrl, urbisLanguages, searchAcrossLanguages, streetNameUrl, addressUrl } from '../../js/search.js';
 import { localizedDatabrusselsUrl } from '../../js/databrussels.js';
 import { i18nFor, LANGUAGES, availableLangs } from './helpers.mjs';
 
@@ -201,4 +201,25 @@ test('le lien de rue se construit depuis href ou depuis le code BeSt', () => {
     'https://databrussels.be/nl/id/streetname/1679'
   );
   assert.equal(streetNameUrl({}, 'fr'), null);
+});
+
+test('le lien d\'adresse vient de l\'adresse, sinon de sa rue', () => {
+  const address = {
+    code: { namespace: 'https://databrussels.be/id/address', objectIdentifier: '1677610', versionIdentifier: '1' },
+    href: 'https://databrussels.be/id/address/1677610/1',
+    hasStreetName: {
+      streetname: {
+        code: { namespace: 'https://databrussels.be/id/streetname', objectIdentifier: '8163', versionIdentifier: '1' },
+        href: 'https://databrussels.be/id/streetname/8163/1',
+      },
+    },
+  };
+  assert.equal(addressUrl(address, 'nl'), 'https://databrussels.be/nl/id/address/1677610/1');
+  assert.equal(
+    addressUrl({ code: address.code, hasStreetName: address.hasStreetName }, 'fr'),
+    'https://databrussels.be/fr/id/address/1677610/1'
+  );
+  assert.equal(addressUrl({ hasStreetName: address.hasStreetName }, 'en'), 'https://databrussels.be/en/id/streetname/8163/1');
+  assert.equal(addressUrl({}, 'fr'), null);
+  assert.equal(addressUrl(undefined, 'fr'), null);
 });

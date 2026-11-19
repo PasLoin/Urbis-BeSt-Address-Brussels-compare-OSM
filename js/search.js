@@ -66,14 +66,23 @@ export function buildUrbisUrl(query, lang = getI18n().dataLang) {
   return url;
 }
 
-export function streetNameUrl(streetName, lang = getI18n().lang) {
-  const code = streetName?.code;
-  let url = streetName?.href || null;
+function databrusselsObjectUrl(obj, kind, lang) {
+  const code = obj?.code;
+  let url = obj?.href || null;
   if (!url && code?.objectIdentifier) {
-    url = `https://${DATABRUSSELS_HOST}/id/streetname/${code.objectIdentifier}`;
+    url = `https://${DATABRUSSELS_HOST}/id/${kind}/${code.objectIdentifier}`;
     if (code.versionIdentifier) url += `/${code.versionIdentifier}`;
   }
   return localizedDatabrusselsUrl(url, lang);
+}
+
+export function streetNameUrl(streetName, lang = getI18n().lang) {
+  return databrusselsObjectUrl(streetName, 'streetname', lang);
+}
+
+export function addressUrl(address, lang = getI18n().lang) {
+  return databrusselsObjectUrl(address, 'address', lang)
+    || streetNameUrl(address?.hasStreetName?.streetname, lang);
 }
 
 export function urbisLanguages(primary = getI18n().dataLang) {
@@ -129,6 +138,7 @@ async function searchUrbisIn(query, lang, maxResults, i18n) {
         const pc = addr.hasPostalInfo?.code?.objectIdentifier || '';
         sub = [mun, pc].filter(Boolean).join(' \u00b7 ');
         pos = parsePosition(addr);
+        refUrl = addressUrl(addr, i18n.lang);
       } else if (item.streetname) {
         const sn = item.streetname;
         label = pickName(sn?.name, i18n.dataLang);
